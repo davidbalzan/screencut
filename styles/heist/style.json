@@ -6,8 +6,10 @@
   "scanlines": true,
   "grade": "eq=contrast=1.06:saturation=0.92",
   "footage": "canvas",
+  "fit": "full",
   "beatGrid": false,
   "leadBeats": 0,
+  "fastForward": false,
   "defaultKind": "desk",
   "rects": {
     "desk": [90, 60, 1074, 960],

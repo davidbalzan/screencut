@@ -33,9 +33,12 @@ def obj(fields, required=()):
 
 TITLE_SPEC = TITLE  # "TEXT" or [["TEXT ", ""], ["ACCENT", "a"]]
 SCENE = obj({"clip": STR, "kind": enum("desk", "wide", "phone", "full"), "rect": arr(NUM, 4), "crop": arr(NUM, 4), "cam": STR,
-             "title": TITLE_SPEC, "sub": STR, "titleSize": NUM}, ["clip", "title"])
+             "title": TITLE_SPEC, "sub": STR, "titleSize": NUM, "speed": NUM, "fastForward": BOOL,
+             "ramps": arr(obj({"from": NUM, "to": NUM, "speed": NUM}, ["from", "to", "speed"])),
+             "fit": enum("full", "content"), "frame": enum("full", "window")}, ["clip", "title"])
 SPEC = obj({
-    "out": STR, "clips": FILE, "work": STR, "speed": NUM, "mode": enum("tutorial", "trailer"), "style": ("style",),
+    "out": STR, "clips": FILE, "work": STR, "speed": NUM, "mode": enum("tutorial", "trailer"), "style": ("style",), "fastForward": BOOL,
+    "fit": enum("full", "content"), "frame": enum("full", "window"),
     "brand": obj({"accent": HEX, "alert": HEX, "glow": HEX, "site": STR, "date": STR, "clock": STR,
                   "ground": HEX, "palette": arr(HEX)}),
     "intro": obj({"len": NUM, "alert": STR, "title": TITLE_SPEC, "sub": STR, "size": NUM}),
@@ -118,14 +121,23 @@ def validate(cfg, p):
         errs.append("video.scenes: needs at least one scene")
     if isinstance(cfg.get("speed"), (int, float)) and cfg["speed"] <= 0:
         errs.append("video.speed: must be above 0")
+    for i, s in enumerate(cfg.get("scenes") if isinstance(cfg.get("scenes"), list) else []):
+        if not isinstance(s, dict):
+            continue
+        if isinstance(s.get("speed"), (int, float)) and s["speed"] <= 0:
+            errs.append(f"video.scenes[{i}].speed: must be above 0")
+        for j, r in enumerate(s.get("ramps") if isinstance(s.get("ramps"), list) else []):
+            if isinstance(r, dict) and all(isinstance(r.get(k), (int, float)) for k in ("from", "to", "speed")):
+                if not (0 <= r["from"] < r["to"]) or r["speed"] <= 0:
+                    errs.append(f"video.scenes[{i}].ramps[{j}]: needs 0 <= from < to (seconds into the clip's action) and speed > 0")
     clock = cfg.get("brand", {}).get("clock") if isinstance(cfg.get("brand"), dict) else None
     if isinstance(clock, str) and not re.fullmatch(r"\d\d:\d\d:\d\d", clock):
         errs.append(f"video.brand.clock: expected HH:MM:SS, got {clock!r}")
     if cfg.get("style", "heist") in styles() and isinstance(cfg.get("scenes"), list):
         st = load_style(cfg.get("style", "heist"))
-        for i, s in enumerate(cfg["scenes"]):  # window styles fit any kind into their one footage box
+        for i, s in enumerate(cfg["scenes"]):  # hud styles (kinetic) place footage by frame, not kind
             k = s.get("kind") if isinstance(s, dict) else None
-            if k in SCENE[1]["kind"][1] and st["footage"] != "window" and k not in st["rects"]:
+            if k in SCENE[1]["kind"][1] and st["footage"] == "canvas" and k not in st["rects"]:
                 errs.append(f"video.scenes[{i}].kind: style {st['name']!r} has no {k!r}; kinds: {', '.join(st['rects'])}")
     clips_path = p(cfg.get("clips", "clips/clips.json")) if isinstance(cfg.get("clips", ""), str) else None
     if clips_path and os.path.exists(clips_path) and isinstance(cfg.get("scenes"), list):

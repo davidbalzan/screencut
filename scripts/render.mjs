@@ -1,5 +1,5 @@
 // Render a style's HUD (styles/<style>/hud.html) frame by frame. Overlay styles (heist) give
-// transparent PNGs; styles that draw the footage themselves (footage "window": kinetic) are
+// transparent PNGs; styles that draw the footage themselves (footage "hud": kinetic) are
 // opaque, so they give JPEGs, which are far smaller and faster.
 //   node render.mjs <timeline.json> <out-dir> [fps=30] [--frames 0,45,120]   (--frames: only those, for contact sheets)
 import { chromium } from "patchright";
@@ -16,7 +16,7 @@ if (!tlFile || !out) { console.error("usage: node render.mjs <timeline.json> <ou
 const tl = JSON.parse(readFileSync(tlFile, "utf8"));
 const style = tl.style ?? { name: "heist" };
 const html = join(dirname(fileURLToPath(import.meta.url)), "..", "styles", style.name, "hud.html");
-const opaque = style.footage === "window";
+const opaque = style.footage === "hud";
 mkdirSync(out, { recursive: true });
 const b = await chromium.launch({ channel: "chrome", headless: true });
 const p = await b.newPage({ viewport: { width: 1920, height: 1080 } });

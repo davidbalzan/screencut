@@ -1,15 +1,18 @@
 {
-  "description": "Kinetic type: huge beat-locked words that slam in, colour-flip grounds, hard cuts, the whole screen in a clean rounded window",
+  "description": "Kinetic type: huge beat-locked words that slam in, colour-flip grounds, hard cuts, the footage full bleed (or in a rounded window) pushing in slowly",
   "cut": "hard",
   "cutSound": "thump",
   "grain": false,
   "scanlines": false,
   "grade": "",
-  "footage": "window",
+  "footage": "hud",
+  "frame": "full",
+  "fit": "full",
   "beatGrid": true,
   "leadBeats": 2,
-  "defaultKind": "full",
-  "rects": {
-    "full": [610, 118, 1232, 770]
+  "fastForward": true,
+  "frames": {
+    "full": [0, 0, 1920, 1080],
+    "window": [610, 118, 1232, 770]
   }
 }

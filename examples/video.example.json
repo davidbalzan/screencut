@@ -1,4 +1,5 @@
 {
+  "style": "heist",
   "out": "my-feature-tutorial.mp4",
   "clips": "clips/clips.json",
   "work": "out",

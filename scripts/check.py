@@ -17,6 +17,7 @@ DEFAULTS = {
     "tutorial": {"maxHold": 6.0, "maxStill": 0.85, "minEndHold": 1.0},
     "trailer": {"maxHold": 1.5, "maxStill": 0.6, "minEndHold": 0.0},
 }
+STILL_NOISE = 0.003  # freezedetect noise: below this a frame counts as unchanged (build.py's fast-forward uses it too)
 LUFS = (-18.0, -10.0)
 TRUE_PEAK = -1.0
 
@@ -118,7 +119,7 @@ def main():
 
     # ---- footage: blank or frozen stretches per scene
     raw = os.path.join(work, "base_raw.mp4")
-    r = ff(["ffmpeg", "-nostdin", "-hide_banner", "-i", raw, "-vf", "freezedetect=n=0.003:d=0.4,blackdetect=d=0.3:pic_th=0.985", "-an", "-f", "null", "-"])
+    r = ff(["ffmpeg", "-nostdin", "-hide_banner", "-i", raw, "-vf", f"freezedetect=n={STILL_NOISE}:d=0.4,blackdetect=d=0.3:pic_th=0.985", "-an", "-f", "null", "-"])
     freezes, open_start = intervals(r.stderr, "freeze_start", "freeze_end")
     if open_start is not None:
         freezes.append((open_start, tl["total"]))

@@ -13,13 +13,17 @@ import base64, colorsys, json, math, os, re, subprocess, sys, shutil
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import beats, config, doctor
+import beats, check, config, content, doctor
 FPS = 30
 BG = "0x03060b"
 ENC = ["-c:v", "libx264", "-preset", "medium", "-crf", "17", "-pix_fmt", "yuv420p", "-r", str(FPS), "-an"]
 # Final export: high@4.1 so older phones/TVs play it (x264 picks 5.0 on its own with -preset slow).
 FINAL = ["-c:v", "libx264", "-preset", "slow", "-crf", "22", "-profile:v", "high", "-level:v", "4.1",
          "-maxrate", "10M", "-bufsize", "20M", "-pix_fmt", "yuv420p"]
+# Fast-forward: a still stretch (a load, a wait for an answer) longer than FF_MIN seconds plays
+# at up to FF_MAX x, so it lasts about FF_KEEP s on screen: the load is still seen, quickly.
+FF_MIN, FF_MAX, FF_KEEP = 0.8, 8.0, 0.25
+WINDOW_ASPECT = (4 / 3, 21 / 9)  # a window frame keeps the footage's aspect within these
 BLINK = re.compile(r'data-blink|class="[^"]*\bblink\b')
 
 
@@ -30,6 +34,46 @@ def palette_from(accent):
     h, l, s = colorsys.rgb_to_hls(r, g, b)
     hexc = lambda h_, l_, s_: "#" + "".join(f"{round(c * 255):02x}" for c in colorsys.hls_to_rgb(h_ % 1, l_, s_))
     return hexc(h + 0.08, 0.1, 0.55), [accent, hexc(h - 0.14, 0.56, 0.95), hexc(h, 0.84, 0.8)]
+
+
+def speed_plan(f, c, s, speed, auto):
+    """The clip's kept action (from `start` s into the file, `raw` s long) as segments
+    (from, to, speed) in kept-window seconds. Explicit `ramps` (seconds into the action) win;
+    with `auto`, still stretches (check.py's stillness measure) play fast, except the one that
+    reaches the end of the clip: that is the result being held so it can be read."""
+    total_src = probe_dur(f)
+    start = max(0, total_src - c["dur"] - 0.3)
+    raw = c["dur"] + 0.5
+    off = total_src - c["dur"] - start  # the action begins this far into the kept window
+    fast = [(r["from"] + off, r["to"] + off, float(r["speed"])) for r in s.get("ramps", [])]
+    if auto:
+        r = subprocess.run(["ffmpeg", "-nostdin", "-hide_banner", "-ss", f"{start}", "-t", f"{raw}", "-i", f, "-vf",
+                            f"setpts=PTS-STARTPTS,fps={FPS},scale=640:-2,freezedetect=n={check.STILL_NOISE}:d={FF_MIN}",
+                            "-an", "-f", "null", "-"], capture_output=True, text=True)
+        still, open_at = check.intervals(r.stderr, "freeze_start", "freeze_end")
+        src_end = min(raw, total_src - start)
+        if open_at is not None:
+            still.append((open_at, src_end))
+        for a, b in still:
+            if b >= src_end - 0.15 or b - a < FF_MIN or any(a < y and b > x for x, y, _ in fast[:len(s.get("ramps", []))]):
+                continue
+            fast.append((a, b, max(speed, min(FF_MAX, (b - a) / FF_KEEP))))
+    segs, at = [], 0.0
+    for a, b, sp in sorted(fast):
+        a, b = max(a, at), min(b, raw)
+        if a - at < 0.1:  # no sliver of normal speed between two stretches
+            a = at
+        if b - a < 0.1:
+            continue
+        if a > at:
+            segs.append((round(at, 3), round(a, 3), speed))
+        segs.append((round(a, 3), round(b, 3), sp))
+        at = b
+    if segs and raw - at < 0.1:  # a sliver at the end joins the last stretch
+        segs[-1] = (segs[-1][0], round(raw, 3), segs[-1][2])
+    elif raw - at > 1e-6:
+        segs.append((round(at, 3), round(raw, 3), speed))
+    return start, raw, segs
 
 
 def fit(aspect, box):
@@ -141,22 +185,43 @@ def main():
     # Each scene: an optional lead-in of leadBeats beats (kinetic: the title slams on a colour
     # ground; the clip's first frame is held under it), then the footage from fstart.
     intro["len"] = snap(intro["len"])
-    window = style["footage"] == "window"
+    hud_footage = style["footage"] == "hud"  # the HUD draws the footage itself (kinetic)
     t, scenes = intro["len"], []
     for i, s in enumerate(cfg["scenes"], 1):
         c = clips.get(s["clip"])
         if not c:
             sys.exit(f"scene {i}: no clip named {s['clip']!r} in clips.json")
         lead = round(after(t, style["leadBeats"]), 3) if style["leadBeats"] else 0.0
-        L = round(snap(t + lead + (c["dur"] + 0.5) / speed) - t, 3)
-        kind = s.get("kind", style["defaultKind"])
-        rect = s.get("rect") or style["rects"].get(kind) or style["rects"][style["defaultKind"]]
-        if window and not s.get("rect"):  # the window keeps the footage's own aspect: the whole screen
-            cw, ch = s["crop"][2:] if s.get("crop") else probe_size(clip_file(c))
-            rect = fit(cw / ch, rect)
+        sp = float(s.get("speed", speed))
+        auto = s.get("fastForward", cfg.get("fastForward", style["fastForward"]))
+        src_start, raw, segs = speed_plan(clip_file(c), c, s, sp, auto)
+        shown = sum((b - a) / v for a, b, v in segs)  # on-screen seconds of footage, ramps included
+        L = round(snap(t + lead + shown) - t, 3)
+        ff, at = [], t + lead  # fast-forwarded stretches in timeline seconds, for the HUD
+        for a, b, v in segs:
+            if v > sp * 1.05:
+                ff.append([round(at, 3), round(at + (b - a) / v, 3), round(v, 1)])
+            at += (b - a) / v
+        # Where the footage goes: a style's rect per kind (heist), or (hud styles) its frame:
+        # "full" fills the picture edge to edge, "window" is a rounded window on a ground.
+        frame = s.get("frame", cfg.get("frame", style.get("frame")))
+        if hud_footage:
+            rect = s.get("rect") or style["frames"][frame]
+        else:
+            kind = s.get("kind", style["defaultKind"])
+            rect = s.get("rect") or style["rects"].get(kind) or style["rects"][style["defaultKind"]]
+        crop, bg = s.get("crop"), None
+        if not crop and s.get("fit", cfg.get("fit", style["fit"])) == "content":  # an explicit crop wins
+            want = WINDOW_ASPECT if hud_footage and frame == "window" else rect[2] / rect[3]
+            r = content.content_crop(clip_file(c), src_start, raw, want)
+            crop, bg = r["crop"], r["bg"]
+            print(f"scene {i}: content crop {crop} of {r['size'][0]}x{r['size'][1]}")
+        if hud_footage and frame == "window" and not s.get("rect"):  # the window takes the footage's aspect
+            cw, ch = crop[2:] if crop else probe_size(clip_file(c))
+            rect = fit(min(max(cw / ch, WINDOW_ASPECT[0]), WINDOW_ASPECT[1]), rect)  # letterboxed beyond 4:3..21:9
         scenes.append(dict(n=i, clip=s["clip"], start=round(t, 3), fstart=round(t + lead, 3), end=round(t + L, 3), len=L, rect=rect,
-                           title=s["title"], sub=s.get("sub", ""), cam=s.get("cam", f"CAM {i:02d}"),
-                           crop=s.get("crop"), titleSize=s.get("titleSize")))
+                           title=s["title"], sub=s.get("sub", ""), cam=s.get("cam", f"CAM {i:02d}"), frame=frame if hud_footage else None,
+                           crop=crop, bg=bg or "#0b0d10", titleSize=s.get("titleSize"), speed=sp, src=[src_start, raw], segs=segs, ff=ff))
         t += L
     total = round(t + end["len"], 3)
     cuts = sorted([intro["len"]] + [s["end"] for s in scenes] + [s["fstart"] for s in scenes if s["fstart"] > s["start"]])
@@ -166,10 +231,15 @@ def main():
         at = 0.0 if a in (None, 0) else (total - end["len"]) if a == "end" else scenes[a - 1]["start"]
         voice.append({**v, "start": round(at + float(v["start"]), 3)})
     tl = dict(total=total, fps=FPS, intro=intro, end=end, scenes=scenes, brand=brand, mode=cfg.get("mode", "tutorial"),
-              cuts=cuts, voice=voice, style={k: v for k, v in style.items() if k != "rects"},
+              cuts=cuts, voice=voice, style={k: v for k, v in style.items() if k not in ("rects", "frames")},
               beat=period, beats=[b for b in beat_list or [] if b <= total + 1])
     json.dump(tl, open(os.path.join(out, "timeline.json"), "w"))
     print(f"timeline: {style['name']} style, {len(scenes)} scenes, {total:.1f} s")
+    for s in scenes:
+        if s["ff"]:
+            kept = s["src"][1]
+            print(f"  scene {s['n']}: {kept:.1f} s of action plays in {s['end'] - s['fstart']:.1f} s; fast-forward "
+                  + ", ".join(f"{b - a:.2f} s at {v:g}x" for a, b, v in s["ff"]))
     # contact-sheet times: a moment into the footage of each scene, once its title is up
     times = [intro["len"] * 0.8] + [s["fstart"] + min(s["end"] - s["fstart"] - 0.2, 2.2) for s in scenes] + [total - 0.5]
 
@@ -192,13 +262,11 @@ def main():
         for s in scenes:
             c = clips[s["clip"]]
             f = clip_file(c)
-            total_src = probe_dur(f)
-            start = max(0, total_src - c["dur"] - 0.3)
-            raw = c["dur"] + 0.5
+            start, raw = s["src"]
             x, y, w, h = s["rect"]
             if s["crop"]:
                 cx, cy, cw, ch = s["crop"]
-            elif window:  # the whole recording
+            elif hud_footage:  # the whole recording
                 (cw, ch), cx, cy = probe_size(f), 0, 0
             else:  # centre crop of the recording to the rect's aspect
                 sw, sh = probe_size(f)
@@ -210,19 +278,32 @@ def main():
             lead = round(s["fstart"] - s["start"], 3)
             hold = f"start_mode=clone:start_duration={lead}:" if lead else ""
             grade = f",{style['grade']}" if style["grade"] else ""
-            src = f"[0:v]setpts=PTS/{speed},fps={FPS},tpad={hold}stop_mode=clone:stop_duration={math.ceil(s['len']) + 1},crop={cw}:{ch}:{cx}:{cy}"
+            segs, n = s["segs"], len(s["segs"])
+            if n == 1:
+                play = f"[0:v]setpts=PTS/{segs[0][2]},fps={FPS}"
+            else:  # speed ramps: each stretch trimmed, retimed, and joined again
+                play = f"[0:v]setpts=PTS-STARTPTS,split={n}" + "".join(f"[i{k}]" for k in range(n)) + ";" + \
+                    ";".join(f"[i{k}]trim=start={a}:end={b},setpts=(PTS-STARTPTS)/{v:.4f}[p{k}]" for k, (a, b, v) in enumerate(segs)) + \
+                    ";" + "".join(f"[p{k}]" for k in range(n)) + f"concat=n={n}:v=1:a=0,fps={FPS}"
+            src = f"{play},tpad={hold}stop_mode=clone:stop_duration={math.ceil(s['len']) + 1},crop={cw}:{ch}:{cx}:{cy}"
             o = os.path.join(out, f"scene{s['n']:02d}.mp4")
             head = ["ffmpeg", "-nostdin", "-v", "error", "-y", "-ss", f"{start}", "-t", f"{raw}", "-i", f,
                     "-f", "lavfi", "-i", f"color=c={BG}:s=1920x1080:r={FPS}:d={s['len']}", "-filter_complex"]
-            if window:
-                # The HUD draws the footage (rounded window, push-in, tilt) from frames at the
-                # recording's own resolution; the canvas mp4 is still made for the checks.
+            if hud_footage:
+                # The HUD draws the footage (full bleed or a window, push-in) from extracted frames,
+                # at most ~1.05x the size it is shown at; the canvas mp4 is still made for the checks.
                 fr = os.path.join(out, "frames", f"scene{s['n']:02d}")
                 shutil.rmtree(fr, ignore_errors=True)
                 os.makedirs(fr)
-                run([*head, f"{src},setsar=1{grade},split[a][b];[a]scale={w}:{h}[v];[1:v][v]overlay={x}:{y}:shortest=1[o]",
+                if s["frame"] == "full":  # cover: fill the rect, cropping what overflows
+                    place = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
+                else:  # contain: letterbox in the page colour
+                    place = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color={s['bg'].replace('#', '0x')}"
+                k = (max if s["frame"] == "full" else min)(w / cw, h / ch) * 1.05  # the scale shown at, push-in included
+                shrink = f",scale={int(cw * k) // 2 * 2}:{int(ch * k) // 2 * 2}" if k < 1 else ""
+                run([*head, f"{src},setsar=1{grade},split[a][b];[a]{place}[v];[1:v][v]overlay={x}:{y}:shortest=1[o];[b]null{shrink}[f]",
                      "-map", "[o]", *ENC, "-t", f"{s['len']}", o,
-                     "-map", "[b]", "-t", f"{s['len']}", "-q:v", "3", "-start_number", "0", os.path.join(fr, "%05d.jpg")])
+                     "-map", "[f]", "-t", f"{s['len']}", "-q:v", "3", "-start_number", "0", os.path.join(fr, "%05d.jpg")])
                 s["frames"] = {"dir": fr, "n": len(os.listdir(fr))}
             else:
                 run([*head, f"{src},scale={w}:{h},setsar=1{grade}[v];[1:v][v]overlay={x}:{y}:shortest=1",
@@ -246,7 +327,7 @@ def main():
     shutil.rmtree(hud, ignore_errors=True)
     run(["node", os.path.join(HERE, "render.mjs"), os.path.join(out, "timeline.json"), hud, str(FPS)])
     video = os.path.join(out, "video.mp4")
-    run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", base_v, "-framerate", str(FPS), "-i", os.path.join(hud, "%05d." + ("jpg" if window else "png")),
+    run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", base_v, "-framerate", str(FPS), "-i", os.path.join(hud, "%05d." + ("jpg" if hud_footage else "png")),
          "-filter_complex", "[0:v][1:v]overlay=0:0:shortest=1", *ENC, video])
 
     # ---- audio: music bed, sound effects and/or voice lines placed at times
