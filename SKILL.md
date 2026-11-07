@@ -1,9 +1,9 @@
 ---
-name: heist-cam
+name: screencut
 description: Make a product video cut from the REAL web UI, in a chosen style — kinetic (huge beat-locked words, colour-flip grounds, the screen beside the type), keynote (calm and premium for presentations: titles gliding in above a browser-window frame, smart zoom with a spotlight and callouts, a chapter bar, per-scene slide clips), social (vertical 9:16 for LinkedIn/Shorts: a crop that pans after the action, big word-by-word captions) or heist (CCTV HUD, glitch cuts) — with beat-synced cuts, sound effects, loads fast-forwarded and an optional ElevenLabs or Google Cloud TTS voice. Scripted end to end with Playwright + an HTML HUD rendered frame by frame + ffmpeg; no video editor. Use when someone asks for a demo video, walkthrough, explainer, tutorial clip, feature trailer, slide clips or "a video for <person>" of a web app or site.
 ---
 
-# heist-cam — product videos cut from the real UI, in a style
+# screencut — product videos cut from the real UI, in a style
 
 **Playwright records the real UI, one short clip per step → the style's HTML HUD, a pure function of time, is rendered frame by frame → ffmpeg stacks footage + HUD + cut effects + audio.** Every word on screen is HTML, so it looks the same on every run and needs no ffmpeg text filter.
 

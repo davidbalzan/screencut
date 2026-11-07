@@ -1,8 +1,8 @@
 {
-  "name": "heist-cam",
+  "name": "screencut",
   "private": true,
   "type": "module",
-  "description": "Record a real web UI, overlay a CCTV-style HUD rendered frame by frame, assemble with ffmpeg.",
+  "description": "Product videos cut from the real web UI in a chosen style: record with Playwright, render an HTML HUD frame by frame, assemble with ffmpeg.",
   "dependencies": {
     "patchright": "1.63.0"
   }

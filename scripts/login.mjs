@@ -2,7 +2,7 @@
 // (SSO, passkey, Cloudflare Access). The agent never types credentials. Close the window
 // when you're logged in; the session stays in <profileDir> for the recordings.
 //
-//   node login.mjs https://app.example.com ~/.cache/heist-cam/example-profile
+//   node login.mjs https://app.example.com ~/.cache/screencut/example-profile
 import { chromium } from "patchright";
 import { resolve } from "node:path";
 

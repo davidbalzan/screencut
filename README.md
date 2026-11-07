@@ -1,8 +1,8 @@
-# heist-cam
+# screencut
 
 **Product videos cut from your real web UI, in a style you pick: kinetic (beat-locked type), keynote (calm, for presentations, with slide clips), social (vertical, captioned) or heist (CCTV). Fully scripted, with no video editor.**
 
-heist-cam is a [Claude Code](https://claude.com/claude-code) skill. Ask Claude for "a demo video of the new dashboard" and it:
+screencut is a [Claude Code](https://claude.com/claude-code) skill. Ask Claude for "a demo video of the new dashboard" and it:
 1. agrees the story with you;
 2. drives your actual app in Chrome and records one short clip per step;
 3. lays the style over the footage, never covering it with text:
@@ -41,9 +41,9 @@ heist-cam is a [Claude Code](https://claude.com/claude-code) skill. Ask Claude f
 ## Install
 
 ```bash
-git clone git@github.com:davidbalzan/heist-cam.git ~/.claude/skills/heist-cam
-cd ~/.claude/skills/heist-cam/scripts && npm install
-python3 ~/.claude/skills/heist-cam/scripts/doctor.py
+git clone git@github.com:davidbalzan/screencut.git ~/.claude/skills/screencut
+cd ~/.claude/skills/screencut/scripts && npm install
+python3 ~/.claude/skills/screencut/scripts/doctor.py
 ```
 
 `doctor.py` checks everything the skill needs and prints the exact fix for anything missing:
@@ -60,19 +60,19 @@ Voice is optional. See [Voice](#voice).
 
 ## Use it
 
-In Claude Code, run `/heist-cam` or just ask for a demo video, explainer, walkthrough, trailer or slide clips. Claude runs the doctor, helps you fix anything missing, then works through the steps below. To do it by hand:
+In Claude Code, run `/screencut` or just ask for a demo video, explainer, walkthrough, trailer or slide clips. Claude runs the doctor, helps you fix anything missing, then works through the steps below. To do it by hand:
 
 ```bash
-mkdir my-video && cp ~/.claude/skills/heist-cam/examples/* my-video/ && cd my-video
+mkdir my-video && cp ~/.claude/skills/screencut/examples/* my-video/ && cd my-video
 # 1. edit record.mjs (your steps), then record the real UI
 node record.mjs                                   # → clips/<name>/*.webm + clips/clips.json
 #    logged-in site? a PERSON logs in first; the agent never handles credentials:
-node ~/.claude/skills/heist-cam/scripts/login.mjs https://app.example.com ~/.cache/heist-cam/profile
+node ~/.claude/skills/screencut/scripts/login.mjs https://app.example.com ~/.cache/screencut/profile
 # 2. edit video.json, validate it
-python3 ~/.claude/skills/heist-cam/scripts/config.py video.json
+python3 ~/.claude/skills/screencut/scripts/config.py video.json
 # 3. HUD-only contact sheet, then the full build (checks run at the end)
-python3 ~/.claude/skills/heist-cam/scripts/build.py video.json --sheet
-python3 ~/.claude/skills/heist-cam/scripts/build.py video.json
+python3 ~/.claude/skills/screencut/scripts/build.py video.json --sheet
+python3 ~/.claude/skills/screencut/scripts/build.py video.json
 ```
 
 Look at `out/contact.png` and watch the video before sharing it. The checks don't replace looking.
@@ -173,5 +173,7 @@ styles/
 ```
 
 ## Credits
+
+screencut was called heist-cam until November 2026, after its first style (still here as `heist`).
 
 The beat-grid cutting and the automated render checks are inspired by Scenario's [Kinetic Film](https://www.scenario.com/explorations/kinetic-film/). Validating the config strictly comes from [OpenKatana](https://github.com/rk0neki/OpenKatana).
