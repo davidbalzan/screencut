@@ -1,7 +1,9 @@
 // Render a style's HUD (styles/<style>/hud.html) frame by frame. Overlay styles (heist) give
-// transparent PNGs; styles that draw the footage themselves (footage "hud": kinetic) are
-// opaque, so they give JPEGs, which are far smaller and faster.
-//   node render.mjs <timeline.json> <out-dir> [fps=30] [--frames 0,45,120]   (--frames: only those, for contact sheets)
+// transparent PNGs; styles that draw the footage themselves (footage "hud": kinetic, keynote,
+// social) are opaque, so they give JPEGs, which are far smaller and faster. The frame size is
+// the timeline's `size` (default 1920x1080; social is 1080x1920).
+//   node render.mjs <timeline.json> <out-dir> [fps=30] [--frames 0,45,120] [--png]
+//   (--frames: only those, for contact sheets and posters; --png: opaque PNGs instead of JPEGs)
 import { chromium } from "patchright";
 import { readFileSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -17,9 +19,11 @@ const tl = JSON.parse(readFileSync(tlFile, "utf8"));
 const style = tl.style ?? { name: "heist" };
 const html = join(dirname(fileURLToPath(import.meta.url)), "..", "styles", style.name, "hud.html");
 const opaque = style.footage === "hud";
+const png = !opaque || args.includes("--png");
+const [W, H] = tl.size ?? [1920, 1080];
 mkdirSync(out, { recursive: true });
 const b = await chromium.launch({ channel: "chrome", headless: true });
-const p = await b.newPage({ viewport: { width: 1920, height: 1080 } });
+const p = await b.newPage({ viewport: { width: W, height: H } });
 // patchright evaluates in an isolated world, so the timeline goes in as a page script.
 await p.addInitScript({ content: `window.__TL = ${JSON.stringify(tl)};` });
 await p.goto("file://" + resolve(html), { waitUntil: "networkidle" });
@@ -32,8 +36,8 @@ for (const i of frames) {
   await p.evaluate((t) => { const s = document.createElement("script"); s.textContent = `window.render(${t})`; document.head.appendChild(s); s.remove(); }, i / fps);
   // The DOM is shared across worlds: wait until every image (footage frames, logos) is decoded.
   await p.evaluate(() => Promise.all([...document.images].map((im) => (im.getAttribute("src") ? im.decode().catch(() => null) : null))));
-  const name = join(out, `${String(i).padStart(5, "0")}.${opaque ? "jpg" : "png"}`);
-  await p.screenshot(opaque ? { path: name, type: "jpeg", quality: 92 } : { path: name, omitBackground: true });
+  const name = join(out, `${String(i).padStart(5, "0")}.${png ? "png" : "jpg"}`);
+  await p.screenshot(png ? { path: name, omitBackground: !opaque } : { path: name, type: "jpeg", quality: 92 });
   if (i % 150 === 0) console.error(`frame ${i}/${frames.length}`);
 }
 await b.close();

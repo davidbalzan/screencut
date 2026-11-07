@@ -1,0 +1,120 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@700;800;900&family=Inter:wght@500;600&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;overflow:hidden;background:#000}
+#ground,#over{position:absolute;inset:0}
+.k{font-family:"Inter Tight";font-weight:900;text-transform:uppercase;letter-spacing:-.015em;line-height:.95}
+.tag{font-family:"Inter Tight";font-weight:800;text-transform:uppercase;letter-spacing:.2em;white-space:nowrap}
+.cap{font-family:"Inter Tight";font-weight:800;letter-spacing:-.01em;line-height:1.1}
+.inter{font-family:Inter}
+#win{position:absolute;display:none;overflow:hidden;border-radius:28px}
+#win img{position:absolute;left:0;top:0;display:block;max-width:none}
+</style>
+<script src="../common.js"></script></head>
+<body><div id="ground"></div><div id="win"><img alt=""></div><div id="over"></div>
+<script>
+// Social: vertical 9:16. A hook title in the first second; per scene the title in a band above
+// the footage, the footage in a vertical window whose crop pans after the action (scene.view
+// keyframes from camera.py), and big word-by-word captions (TL.captions, from the voice lines)
+// in their own band below it, the current word in the accent. Nothing covers the footage.
+// window.render(t) is a pure function of t.
+const TL = window.__TL, B = TL.brand, FPS = TL.fps ?? 30, [W, H] = TL.size ?? [1080, 1920];
+for (const el of [document.documentElement, document.body]) Object.assign(el.style, { width: W + "px", height: H + "px" });
+const ground = document.getElementById("ground"), over = document.getElementById("over"), win = document.getElementById("win"), img = win.querySelector("img");
+const P = B.palette?.length ? B.palette : [B.accent], G = B.ground;
+const pop = (i) => { const c = P[i % P.length]; return lum(c) > 0.18 ? c : B.accent; };
+const on = (bg) => (lum(bg) > 0.3 ? mix(G, "#000000", 0.45) : "#fbfbf7");
+ground.style.background = `radial-gradient(90% 60% at 50% 38%,${mix(G, "#ffffff", 0.08)} 0%,${G} 60%,${mix(G, "#000000", 0.4)} 100%)`;
+const parts = (title) => (typeof title === "string" ? [[title, ""]] : title);
+const plain = (title) => parts(title).map(([s]) => s).join("").trim();
+
+// A slam: scale from -> 1 with a fast ease-out and a blur that clears as it lands.
+function slam(dt, from = 1.25) {
+  if (dt < 0) return "opacity:0";
+  const e = 1 - Math.pow(1 - clamp(dt / 0.2), 4);
+  return `transform:scale(${(from - (from - 1) * e).toFixed(4)});filter:blur(${((1 - e) * 8).toFixed(2)}px)`;
+}
+// Big type on up to two lines: the size at which the longer line fits maxW.
+function lines(text, maxW, maxPx, weight = 900) {
+  const font = (px) => `${weight} ${px}px "Inter Tight"`, up = text.toUpperCase();
+  const one = Math.floor((maxW / Math.max(textWidth(up, font(100)), 1)) * 100);
+  if (one >= maxPx * 0.72 || !up.includes(" ")) return { size: Math.min(maxPx, one), rows: [text] };
+  const ws = text.split(" ");
+  let best = null;
+  for (let i = 1; i < ws.length; i++) {
+    const r = [ws.slice(0, i).join(" "), ws.slice(i).join(" ")];
+    const wd = Math.max(...r.map((s) => textWidth(s.toUpperCase(), font(100))));
+    if (!best || wd < best.wd) best = { wd, rows: r };
+  }
+  return { size: Math.min(maxPx, Math.floor((maxW / best.wd) * 100)), rows: best.rows };
+}
+// A title's words keep their accent parts: [["SAY WHAT ", ""], ["YOU WANT", "a"]].
+function painted(title, rows, accent) {
+  const acc = new Set();
+  let at = 0;
+  for (const [s, c] of parts(title)) { if (c === "a") for (let i = 0; i < s.length; i++) acc.add(at + i); at += s.length; }
+  const full = parts(title).map(([s]) => s).join("");
+  let from = 0;
+  return rows.map((row) => {
+    const i = full.indexOf(row, from); from = i + row.length;
+    return `<div>${[...row].map((ch, j) => `<span style="color:${acc.has(i + j) ? accent : "#fbfbf7"}">${esc(ch)}</span>`).join("")}</div>`;
+  }).join("");
+}
+
+// Captions: the page of words being spoken, the current word in the accent.
+function caption(t) {
+  const pg = (TL.captions ?? []).find((p) => t >= p.t0 && t < p.t1);
+  if (!pg) return "";
+  const ws = pg.words, k = ws.findLastIndex(([, s]) => t >= s), done = t >= pg.end;
+  const text = ws.map(([w]) => w).join(" ");
+  const size = Math.min(92, Math.floor((960 * 2 / Math.max(textWidth(text, `800 100px "Inter Tight"`), 1)) * 100 * 0.9));
+  return `<div class="cap" style="position:absolute;left:60px;right:60px;top:1530px;height:290px;display:flex;align-items:center;justify-content:center;text-align:center;text-wrap:balance;font-size:${size}px;${slam(t - pg.t0, 1.08)}">
+    <div>${ws.map(([w], i) => `<span style="color:${i === k && !done ? B.accent : i <= k ? "#fbfbf7" : "rgba(251,251,247,.5)"};">${esc(w)}</span>`).join(" ")}</div></div>`;
+}
+
+window.render = (t) => {
+  let html = "";
+  win.style.display = "none";
+  const sc = TL.scenes.find((s) => t >= s.start && t < s.end);
+  const endStart = TL.total - TL.end.len, N = TL.scenes.length;
+
+  if (t < TL.intro.len) {
+    // The hook: the title lands in the first frames, big, with the kicker and the line.
+    const I = TL.intro, L = lines(plain(I.title), 960, 230), kicker = String(I.alert ?? "").replace(/^[●•\s]+/, "");
+    html += `<div style="position:absolute;left:60px;right:60px;top:0;height:1480px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:40px;text-align:center">
+      ${kicker ? `<div class="tag" style="font-size:30px;color:${pop(1)};${slam(t - 0.1, 1.15)}">${esc(kicker)}</div>` : ""}
+      <div class="k" style="font-size:${L.size}px;${slam(t)}">${painted(I.title, L.rows, pop(0))}</div>
+      <div style="height:12px;width:${(ease((t - 0.15) / 0.35) * 220).toFixed(1)}px;border-radius:6px;background:${pop(1)}"></div>
+      ${I.sub ? `<div class="inter" style="font-weight:600;font-size:40px;line-height:1.3;color:rgba(251,251,247,.88);${slam(t - 0.3, 1.1)}">${esc(I.sub)}</div>` : ""}</div>`;
+  } else if (sc) {
+    const lt = t - sc.start, [x, y, w, h] = sc.rect, hue = pop(sc.n - 1);
+    // the footage, in its window, the crop panning after the action
+    Object.assign(win.style, { display: "block", left: x + "px", top: y + "px", width: w + "px", height: h + "px", background: sc.bg ?? "#ffffff",
+      boxShadow: `0 30px 70px rgba(0,0,0,.5),0 0 0 2px ${alpha(hue, 0.35)},0 0 120px ${alpha(hue, 0.18)}` });
+    const src = frameSrc(sc, t, FPS);
+    if (src) { if (img.getAttribute("src") !== src) img.setAttribute("src", src); } else img.removeAttribute("src");
+    showView(img, sc, viewAt(sc, t), w);
+    // the title band above it
+    const L = lines(plain(sc.title), 1000, 112);
+    const fwd = (sc.ff ?? []).find(([a, b]) => t >= a && t < b);
+    const chip = fwd ? `<div class="tag" style="display:inline-block;font-size:26px;letter-spacing:.08em;padding:8px 18px;border-radius:999px;background:${hue};color:${on(hue)};opacity:${(clamp((t - fwd[0]) / 0.08) * clamp((fwd[1] - t) / 0.08)).toFixed(3)}">
+      ${[0, 1, 2].map((i) => `<span style="opacity:${i === Math.floor(t * 12) % 3 ? 1 : 0.35}">›</span>`).join("")}&nbsp;${fwd[2]}×</div>` : "";
+    html += `<div style="position:absolute;left:40px;right:40px;top:96px;height:${y - 96 - 36}px;display:flex;flex-direction:column;justify-content:flex-end;gap:22px">
+      <div style="display:flex;align-items:center;justify-content:space-between;height:52px"><div class="tag" style="font-size:30px;color:${hue};${slam(lt, 1.1)}">${pad(sc.n)} / ${pad(N)}</div>${chip}</div>
+      <div class="k" style="font-size:${L.size}px;transform-origin:0 100%;${slam(lt)}">${painted(sc.title, L.rows, hue)}</div></div>`;
+    // progress: one segment per step, under the captions
+    html += `<div style="position:absolute;left:40px;right:40px;top:1850px;display:flex;gap:10px">${TL.scenes.map((s) =>
+      `<div style="flex:1;height:8px;border-radius:4px;background:rgba(255,255,255,.14);overflow:hidden"><div style="height:100%;width:${((t >= s.end ? 1 : clamp((t - s.start) / (s.end - s.start))) * 100).toFixed(1)}%;background:${s === sc ? hue : "rgba(255,255,255,.6)"}"></div></div>`).join("")}</div>`;
+  } else if (t >= endStart) {
+    const lt = t - endStart, E = TL.end, L = lines(E.line ?? "", 960, 120);
+    html += `<div style="position:absolute;left:60px;right:60px;top:0;height:1480px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:48px;text-align:center">
+      <div id="endlogo" style="display:flex;align-items:center;gap:26px;${slam(lt)}">${E.logoHtml ?? ""}</div>
+      <div class="k" style="font-size:${L.size}px;color:#fbfbf7;${slam(lt - 0.35)}">${L.rows.map((r, i) => `<div style="color:${i === L.rows.length - 1 && L.rows.length > 1 ? pop(0) : "#fbfbf7"}">${esc(r)}</div>`).join("")}</div>
+      <div style="font-family:'Inter Tight';font-weight:700;font-size:48px;color:${pop(1)};min-height:58px">${lt < 0.8 ? "" : typed(E.url ?? "", (lt - 0.8) / 0.5, "|")}</div></div>`;
+  }
+  html += caption(t);
+  over.innerHTML = html;
+  if (t >= endStart) applyBlink(over, t - endStart);
+};
+</script></body></html>

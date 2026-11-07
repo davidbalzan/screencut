@@ -1,0 +1,31 @@
+{
+  "description": "Social: vertical 9:16 for LinkedIn and Shorts; a hook title in the first second, the footage in a vertical window that pans after the action, big word-by-word captions in their own band below it, hard cuts on the beat",
+  "size": [
+    1080,
+    1920
+  ],
+  "cut": "hard",
+  "cutSound": "thump",
+  "grain": false,
+  "scanlines": false,
+  "grade": "",
+  "footage": "hud",
+  "layout": "phone",
+  "fit": "full",
+  "beatGrid": true,
+  "leadBeats": 0,
+  "fastForward": true,
+  "speed": 2.0,
+  "camera": "pan",
+  "zoomMin": 1.6,
+  "zoomMax": 2.2,
+  "captions": true,
+  "layouts": {
+    "phone": [
+      40,
+      420,
+      1000,
+      1080
+    ]
+  }
+}

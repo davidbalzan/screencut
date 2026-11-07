@@ -11,7 +11,7 @@ import json, os, platform, re, shutil, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAC = platform.system() == "Darwin"
-NEEDED_FILTERS = ["rgbashift", "noise", "ebur128", "freezedetect", "blackdetect", "acrusher", "anoisesrc", "amix", "adelay"]
+NEEDED_FILTERS = ["rgbashift", "noise", "ebur128", "freezedetect", "blackdetect", "silencedetect", "acrusher", "anoisesrc", "amix", "adelay"]
 
 
 def out(cmd):

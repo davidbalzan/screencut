@@ -1,0 +1,23 @@
+{
+  "description": "Keynote: calm and premium for presentations; titles glide in above (or beside) a still browser-window frame, the camera eases into where the action is with a soft spotlight and a callout, a chapter bar below; per-scene slide clips and posters",
+  "cut": "soft",
+  "cutSound": "whoosh",
+  "grain": false,
+  "scanlines": false,
+  "grade": "",
+  "footage": "hud",
+  "layout": "above",
+  "fit": "full",
+  "beatGrid": false,
+  "leadBeats": 0,
+  "fastForward": true,
+  "sync": "bar",
+  "camera": "zoom",
+  "zoomMin": 1.3,
+  "zoomMax": 2.2,
+  "slides": true,
+  "layouts": {
+    "above": [302, 250, 1316, 740],
+    "beside": [560, 214, 1300, 732]
+  }
+}

@@ -111,7 +111,8 @@ def main():
     a = next((s for s in info["streams"] if s["codec_type"] == "audio"), None)
     dur = float(info["format"]["duration"])
     add("PASS" if abs(dur - tl["total"]) <= 0.15 else "FAIL", "length", f"{dur:.2f} s (timeline {tl['total']:.2f} s)")
-    ok = v["codec_name"] == "h264" and v.get("pix_fmt") == "yuv420p" and v.get("profile") in ("High", "Main", "Constrained Baseline") and int(v.get("level", 99)) <= (51 if v["height"] > 1080 else 42)
+    # level 4.2 at most up to 1080p in either orientation (1080x1920@30 fits 4.1: 8160 macroblocks a frame)
+    ok = v["codec_name"] == "h264" and v.get("pix_fmt") == "yuv420p" and v.get("profile") in ("High", "Main", "Constrained Baseline") and int(v.get("level", 99)) <= (51 if v["width"] * v["height"] > 1920 * 1088 else 42)
     add("PASS" if ok else "FAIL", "phone playback", f"{v['codec_name']} {v.get('profile')} L{v.get('level')} {v.get('pix_fmt')} {v['width']}x{v['height']}")
     add("PASS" if moov_before_mdat(final) else "FAIL", "faststart", "moov before mdat" if moov_before_mdat(final) else "moov after mdat: web players must download the whole file first")
     mb, rate = os.path.getsize(final) / 1e6, float(info["format"].get("bit_rate", 0)) / 1e6

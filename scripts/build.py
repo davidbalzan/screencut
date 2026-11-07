@@ -7,13 +7,15 @@ Steps: base footage (each clip trimmed to its action, sped up, cropped into its 
 near-black canvas) -> the style's cut effect and grain -> the style's HUD rendered frame by
 frame (render.mjs) and overlaid -> music, sound effects and/or voice lines -> H.264 mp4.
 The look comes from `style` (styles/<name>/: hud.html + style.json); heist is the default.
+Styles with a camera (keynote zooms, social pans) look where the action is (camera.py);
+keynote also writes per-scene slide clips (slides.py); social adds word-by-word captions.
 No ffmpeg text filters anywhere: every word on screen is HTML in the HUD.
 """
 import base64, colorsys, json, math, os, re, subprocess, sys, shutil
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import beats, check, config, content, doctor
+import beats, camera, captions, check, config, content, doctor, slides
 FPS = 30
 BG = "0x03060b"
 ENC = ["-c:v", "libx264", "-preset", "medium", "-crf", "17", "-pix_fmt", "yuv420p", "-r", str(FPS), "-an"]
@@ -124,8 +126,9 @@ def main():
     if missing := [f"{name}: {detail}\n    fix: {fix}" for ok, name, detail, fix in doctor.required() if not ok]:
         sys.exit("not set up yet:\n  " + "\n  ".join(missing) + f"\n(full report: python3 {os.path.join(HERE, 'doctor.py')})")
 
-    speed = float(cfg.get("speed", 1.5))
     style = config.load_style(cfg.get("style", "heist"))
+    speed = float(cfg.get("speed", style.get("speed", 1.5)))
+    W, H = style.get("size", [1920, 1080])  # the output frame
     brand = {"accent": "#4ade80", "alert": "#f87171", "glow": "#0b2416", "site": "", "date": "", "clock": "04:21:07", **cfg.get("brand", {})}
     for k in ("accent", "alert"):
         if not (brand[k].startswith("#") and len(brand[k]) == 7):
@@ -161,9 +164,11 @@ def main():
     # Styles with a beatGrid (kinetic) cut and slam words on a grid even without music sync:
     # music.bpm (and music.offset) if given, else 120 BPM from 0.
     grid, beat_list, period = None, None, None
+    if m.get("sync") is True:  # the style's choice: keynote cuts on the bar, the rest on the beat
+        m["sync"] = style.get("sync", "beat")
     if m.get("sync"):
         if m["sync"] not in ("beat", "bar"):
-            sys.exit('music.sync must be "beat" or "bar"')
+            sys.exit('music.sync must be true, "beat" or "bar"')
         r = beats.analyse(p(m["file"]), m.get("bpm"))
         b = [x + m.get("offset", 0.0) for x in r["beats"]]
         grid = b[(r["barPhase"] + int(m.get("barOffset", 0))) % 4::4] if m["sync"] == "bar" else b
@@ -233,12 +238,18 @@ def main():
             r = content.content_crop(clip_file(c), src_start, raw, want)
             crop, bg = r["crop"], r["bg"]
             print(f"scene {i}: content crop {crop} of {r['size'][0]}x{r['size'][1]}")
-        if hud_footage and not s.get("rect"):  # the footage keeps its aspect: nothing of the screen is cut
-            cw, ch = crop[2:] if crop else probe_size(clip_file(c))
+        cw, ch = crop[2:] if crop else probe_size(clip_file(c))
+        if hud_footage and not s.get("rect") and style.get("camera") != "pan":  # the footage keeps its aspect: nothing of the screen is cut
             rect = fit(min(max(cw / ch, WINDOW_ASPECT[0]), WINDOW_ASPECT[1]), rect)  # letterboxed beyond 4:3..21:9
         scenes.append(dict(n=i, clip=s["clip"], start=round(t, 3), fstart=round(t + lead, 3), end=round(t + L, 3), len=L, rect=rect,
                            title=s["title"], sub=s.get("sub", ""), cam=s.get("cam", f"CAM {i:02d}"), layout=layout if hud_footage else None,
                            crop=crop, bg=bg or "#0b0d10", titleSize=s.get("titleSize"), speed=sp, src=[src_start, raw], segs=segs, ff=ff))
+        if style.get("camera"):  # keynote zooms into the action, social pans a vertical crop after it
+            kept_off = probe_dur(clip_file(c)) - c["dur"] - src_start  # the action starts this far into the kept window
+            cam = camera.plan(style, s, c, crop, (cw, ch), rect, (clip_file(c), src_start, raw), segs,
+                              t + lead, t + L, kept_off, s.get("zoom", cfg.get("zoom")))
+            scenes[-1].update(fsize=[cw, ch], callout=s.get("callout", ""), chapter=s.get("chapter") or s["title"], **cam)
+            print(f"scene {i}: camera from {cam['focusFrom']}, " + (f"{len(cam['view'])} keyframes" if cam["view"] else "still"))
         t += L
     end["len"] = max(end["len"], said.get("end", 0.0))
     total = round(t + end["len"], 3)
@@ -251,6 +262,10 @@ def main():
     tl = dict(total=total, fps=FPS, intro=intro, end=end, scenes=scenes, brand=brand, mode=cfg.get("mode", "tutorial"),
               cuts=cuts, voice=voice, style={k: v for k, v in style.items() if k not in ("rects", "layouts")},
               beat=period, beats=[b for b in beat_list or [] if b <= total + 1])
+    if style.get("size"):
+        tl["size"] = [W, H]
+    if style.get("captions"):  # word by word, from the voice lines' text and timing
+        tl["captions"] = captions.caption_pages([{**v, "file": p(v["file"])} for v in voice])
     json.dump(tl, open(os.path.join(out, "timeline.json"), "w"))
     print(f"timeline: {style['name']} style, {len(scenes)} scenes, {total:.1f} s")
     for s in scenes:
@@ -259,7 +274,9 @@ def main():
             print(f"  scene {s['n']}: {kept:.1f} s of action plays in {s['end'] - s['fstart']:.1f} s; fast-forward "
                   + ", ".join(f"{b - a:.2f} s at {v:g}x" for a, b, v in s["ff"]))
     # contact-sheet times: a moment into the footage of each scene, once its title is up
-    times = [intro["len"] * 0.8] + [s["fstart"] + min(s["end"] - s["fstart"] - 0.2, 2.2) for s in scenes] + [total - 0.5]
+    # (camera styles: the middle of the zoomed hold, so the sheet shows the spotlight and callout)
+    times = [intro["len"] * 0.8] + [(s["spots"][0][0] + s["spots"][0][1]) / 2 if s.get("spots") else
+                                    s["fstart"] + min(s["end"] - s["fstart"] - 0.2, 2.2) for s in scenes] + [total - 0.5]
 
     if sheet_only:
         frames = [int(x * FPS) for x in times]
@@ -274,7 +291,7 @@ def main():
     with open(lst, "w") as L_:
         def blank(name, d):
             f = os.path.join(out, f"{name}.mp4")
-            run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={BG}:s=1920x1080:r={FPS}:d={d}", *ENC, f])
+            run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={BG}:s={W}x{H}:r={FPS}:d={d}", *ENC, f])
             L_.write(f"file '{f}'\n")
         blank("intro", intro["len"])
         for s in scenes:
@@ -306,7 +323,7 @@ def main():
             src = f"{play},tpad={hold}stop_mode=clone:stop_duration={math.ceil(s['len']) + 1},crop={cw}:{ch}:{cx}:{cy}"
             o = os.path.join(out, f"scene{s['n']:02d}.mp4")
             head = ["ffmpeg", "-nostdin", "-v", "error", "-y", "-ss", f"{start}", "-t", f"{raw}", "-i", f,
-                    "-f", "lavfi", "-i", f"color=c={BG}:s=1920x1080:r={FPS}:d={s['len']}", "-filter_complex"]
+                    "-f", "lavfi", "-i", f"color=c={BG}:s={W}x{H}:r={FPS}:d={s['len']}", "-filter_complex"]
             if hud_footage:
                 # The HUD draws the footage (its layout, the push-in) from extracted frames, at most
                 # ~1.05x the size it is shown at; the canvas mp4 is still made for the checks.
@@ -316,6 +333,8 @@ def main():
                 # contain: letterboxed in the page colour when the aspect is beyond 4:3..21:9
                 place = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color={s['bg'].replace('#', '0x')}"
                 k = min(w / cw, h / ch) * 1.05  # the scale shown at, push-in included
+                if s.get("view"):  # a camera shows part of the frame: the scale at its closest view
+                    k = max(w / v[3] for v in s["view"]) * 1.05
                 shrink = f",scale={int(cw * k) // 2 * 2}:{int(ch * k) // 2 * 2}" if k < 1 else ""
                 run([*head, f"{src},setsar=1{grade},split[a][b];[a]{place}[v];[1:v][v]overlay={x}:{y}:shortest=1[o];[b]null{shrink}[f]",
                      "-map", "[o]", *ENC, "-t", f"{s['len']}", o,
@@ -372,21 +391,33 @@ def main():
     print(f"done: {final} ({probe_dur(final):.1f} s)")
     sheet = os.path.join(out, "contact.png")
     sel = "+".join(f"eq(n\\,{int(x * FPS)})" for x in times)
-    run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", final, "-vf", f"select='{sel}',scale=640:-1,tile={min(4, len(times))}x{-(-len(times) // 4)}", "-frames:v", "1", "-fps_mode", "passthrough", sheet])
+    cols = 4 if W >= H else 8  # vertical video: one row of narrow frames
+    run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", final, "-vf", f"select='{sel}',scale={640 if W >= H else 360}:-1,tile={min(cols, len(times))}x{-(-len(times) // cols)}", "-frames:v", "1", "-fps_mode", "passthrough", sheet])
     print(f"contact sheet: {sheet} — look at it before sharing")
+    exp = {"slides": bool(style.get("slides")), "aspect": "16:9", **cfg.get("exports", {})}
+    if exp["slides"]:
+        if not hud_footage:
+            sys.exit(f"exports.slides needs a style that draws the footage in its HUD; {style['name']} doesn't")
+        slides.export(tl, out, os.path.join(out, "slides"), exp["aspect"], run, HERE)
     sys.exit(subprocess.run([sys.executable, os.path.join(HERE, "check.py"), cfg_path]).returncode)
 
 
 def sfx_events(sfx, cuts, out, p, sound="static"):
     """sfx = {"cut": "auto" | "<file>", "volume": 0.6, "events": [{"at": s, "file": f, "volume": v}]}
     "auto" makes a hit with ffmpeg, per the style's cutSound: "static" (heist) is a short static
-    burst + low thump, "thump" (kinetic) a clean low punch with a click. Always length-capped:
-    an uncapped generator once wrote a 95 GB wav. Cut hits land on the cut."""
+    burst + low thump, "thump" (kinetic, social) a clean low punch with a click, "whoosh"
+    (keynote) a soft swell of filtered noise that peaks on the cut. Always length-capped: an
+    uncapped generator once wrote a 95 GB wav. Cut hits land on the cut."""
     if not sfx:
         return []
     ev = []
-    hit = sfx.get("cut")
-    if hit == "auto" and sound == "thump":
+    hit, lead = sfx.get("cut"), 0.03
+    if hit == "auto" and sound == "whoosh":
+        hit, lead = os.path.join(out, "sfx_whoosh.wav"), 0.28
+        run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "anoisesrc=d=0.6:c=pink:a=0.5", "-af",
+             "highpass=f=350,lowpass=f=5000,afade=t=in:st=0:d=0.28:curve=qsin,afade=t=out:st=0.3:d=0.3:curve=qsin,volume=0.7",
+             "-t", "0.6", "-ar", "48000", hit])
+    elif hit == "auto" and sound == "thump":
         hit = os.path.join(out, "sfx_thump.wav")
         run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=58:d=0.22",
              "-f", "lavfi", "-i", "anoisesrc=d=0.03:c=pink:a=0.5", "-filter_complex",
@@ -400,7 +431,7 @@ def sfx_events(sfx, cuts, out, p, sound="static"):
              "[1]afade=t=out:st=0:d=0.24,volume=1.4[k];[n][k]amix=inputs=2:normalize=0",
              "-t", "0.3", "-ar", "48000", hit])
     if hit:
-        ev += [{"file": hit, "start": max(0.0, c - 0.03), "volume": sfx.get("volume", 0.6)} for c in cuts]
+        ev += [{"file": hit, "start": max(0.0, c - lead), "volume": sfx.get("volume", 0.6)} for c in cuts]
     ev += [{"file": e["file"], "start": e["at"], "volume": e.get("volume", sfx.get("volume", 0.6))} for e in sfx.get("events", [])]
     return ev
 

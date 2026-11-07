@@ -1,0 +1,186 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;overflow:hidden}
+#ground,#over,#fade{position:absolute;inset:0}
+.t{font-family:"Inter Tight";font-weight:600;letter-spacing:-.022em;line-height:1.08}
+.i{font-family:Inter}
+.cap{font-family:Inter;font-weight:600;letter-spacing:.16em;text-transform:uppercase}
+#frame{position:absolute;display:none;border-radius:14px;overflow:hidden}
+#bar{position:absolute;left:0;right:0;top:0;display:flex;align-items:center;background:#eef1f5;border-bottom:1px solid #dde3ea}
+#win{position:absolute;left:0;right:0;bottom:0;overflow:hidden}
+#win img{position:absolute;left:0;top:0;display:block;max-width:none}
+#spot{position:absolute;border-radius:10px;display:none}
+</style>
+<script src="../common.js"></script></head>
+<body><div id="ground"></div>
+<div id="frame"><div id="bar"></div><div id="win"><img id="prev" alt=""><img id="cur" alt=""><div id="spot"></div></div></div>
+<div id="over"></div><div id="fade"></div>
+<script>
+// Keynote: calm and premium. The footage sits in a still browser-window frame; per scene the
+// camera eases into where the action is (scene.view keyframes from camera.py), a soft
+// spotlight dims the rest and a callout points at it from outside; the title glides in above
+// (layout "above") or beside ("beside") the frame, a chapter bar runs below it. Text never
+// covers the footage. TL.slide renders one scene alone for the slide exports (slides.py).
+// window.render(t) is a pure function of t.
+const TL = window.__TL, B = TL.brand, FPS = TL.fps ?? 30, [W, H] = TL.size ?? [1920, 1080];
+for (const el of [document.documentElement, document.body]) Object.assign(el.style, { width: W + "px", height: H + "px" });
+const $ = (id) => document.getElementById(id);
+const ground = $("ground"), over = $("over"), fade = $("fade"), frame = $("frame"), bar = $("bar"), win = $("win"),
+  cur = $("cur"), prev = $("prev"), spotEl = $("spot");
+const BAR = 38;
+
+// ---- look: a deep slate tinted toward the brand, or the brand's own light ground
+const LIGHT = lum(B.ground) > 0.45;
+const G = LIGHT ? B.ground : mix("#0f172a", B.ground, 0.3);
+const INK = LIGHT ? "#0f172a" : "#f8fafc";
+const MUTED = LIGHT ? "#475569" : "rgba(226,232,240,.7)";
+const FAINT = LIGHT ? "rgba(15,23,42,.12)" : "rgba(255,255,255,.13)";
+const ACC = LIGHT && lum(B.accent) > 0.4 ? mix(B.accent, "#000000", 0.42) : B.accent; // accent text that reads on the ground
+ground.style.background = LIGHT
+  ? `radial-gradient(120% 90% at 50% 0%,${mix(G, "#ffffff", 0.5)} 0%,${G} 60%,${mix(G, "#000000", 0.06)} 100%)`
+  : `radial-gradient(120% 90% at 50% 0%,${mix(G, "#ffffff", 0.07)} 0%,${G} 55%,${mix(G, "#000000", 0.3)} 100%)`;
+const SHADOW = LIGHT ? "0 30px 70px rgba(15,23,42,.18),0 8px 22px rgba(15,23,42,.10),0 0 0 1px rgba(15,23,42,.08)"
+  : "0 40px 90px rgba(2,6,23,.55),0 12px 30px rgba(2,6,23,.35),0 0 0 1px rgba(255,255,255,.07)";
+const site = String(TL.end?.url || B.site || "").toLowerCase();
+bar.style.height = BAR + "px";
+bar.innerHTML = `<div style="display:flex;gap:8px;margin-left:16px">${["#ff5f57", "#febc2e", "#28c840"].map((c) => `<span style="width:12px;height:12px;border-radius:50%;background:${c};opacity:.85"></span>`).join("")}</div>
+  ${site ? `<div class="i" style="position:absolute;left:50%;transform:translateX(-50%);font-size:15px;font-weight:500;color:#64748b;background:#fff;border:1px solid #dde3ea;border-radius:7px;padding:3px 44px">${esc(site)}</div>` : ""}`;
+
+// ---- motion: text glides in (soft blur, eased, a small rise) and out before the cut
+function glide(dt, out = Infinity, dur = 0.7, rise = 16) {
+  if (dt < 0) return "opacity:0";
+  const e = ease(dt / dur), q = clamp(out / 0.3), k = e * q;
+  return `opacity:${k.toFixed(3)};transform:translateY(${((1 - e) * rise - (1 - q) * 6).toFixed(2)}px);filter:blur(${((1 - e) * 8 + (1 - q) * 5).toFixed(2)}px)`;
+}
+const parts = (title) => (typeof title === "string" ? [[title, ""]] : title);
+const plain = (title) => parts(title).map(([s]) => s).join("");
+const titleHtml = (title) => parts(title).map(([s, c]) => `<span style="color:${c === "a" ? ACC : INK}">${esc(s)}</span>`).join("");
+function fitPx(text, font, maxW, maxPx, minPx = 18) { // largest size <= maxPx at which text fits maxW on one line
+  const w = textWidth(text, font.replace("{}", "100px"));
+  return clamp(Math.floor((maxW / Math.max(w, 1)) * 100), minPx, maxPx);
+}
+
+// ---- the footage, the camera, the spotlight and the callout
+function footage(sc, t, html) {
+  const [x, y, w, h] = sc.rect;
+  Object.assign(frame.style, { display: "block", left: x + "px", top: y - BAR + "px", width: w + "px", height: h + BAR + "px", boxShadow: SHADOW });
+  Object.assign(win.style, { top: BAR + "px", height: h + "px", background: sc.bg ?? "#ffffff" });
+  const src = frameSrc(sc, t, FPS);
+  if (src) { if (cur.getAttribute("src") !== src) cur.setAttribute("src", src); } else cur.removeAttribute("src");
+  const v = viewAt(sc, t), s = showView(cur, sc, v, w);
+  // soft cut: the previous scene's last frame (at its full view) dissolves into this one
+  const i = TL.scenes.indexOf(sc), pv = TL.scenes[i - 1], k = clamp((t - sc.start) / 0.35);
+  if (!TL.slide && pv && k < 1 && pv.rect.join() === sc.rect.join() && pv.frames) {
+    const ps = frameSrc(pv, pv.end, FPS);
+    if (prev.getAttribute("src") !== ps) prev.setAttribute("src", ps);
+    showView(prev, pv, viewAt(pv, pv.end), w);
+    prev.style.display = "block";
+    cur.style.opacity = easeInOut(k).toFixed(3);
+  } else { prev.style.display = "none"; cur.style.opacity = 1; }
+  // the spotlight: the rest of the frame dims a little, the region gets a thin accent ring
+  const sp = (sc.spots ?? []).find(([a, b]) => t >= a && t < b);
+  if (!sp) { spotEl.style.display = "none"; return html; }
+  const kk = ease((t - sp[0]) / 0.45) * clamp((sp[1] - t) / 0.3);
+  const bx = (sp[2] - v[0]) * s, by = (sp[3] - v[1]) * s, bw = sp[4] * s, bh = sp[5] * s;
+  Object.assign(spotEl.style, { display: "block", left: bx + "px", top: by + "px", width: bw + "px", height: bh + "px",
+    boxShadow: `0 0 0 4000px ${alpha("#0f172a", (0.34 * kk).toFixed(3))},0 0 0 2px ${alpha(B.accent, (0.9 * kk).toFixed(3))},0 0 0 7px ${alpha(B.accent, (0.16 * kk).toFixed(3))}` });
+  if (!sc.callout) return html;
+  // The callout never sits on the footage: in the ground beside the window, level with the
+  // spot, a thin line running to the spot's edge; where there is no room beside the window
+  // (layout "beside", slides) in the band under it, a line running up to the spot.
+  const font = "600 20px Inter", X = x + bx, Y = y + by, line = alpha(B.accent, 0.9 * kk);
+  const room = Math.min(x, W - x - w) - 40, natural = Math.ceil(textWidth(sc.callout, font)) + 60; // dot, gap and padding included
+  const pill = (left, top, width, extra = "") => `<div class="i" style="position:absolute;left:${left}px;top:${top}px;${width ? `width:${width}px;` : ""}box-sizing:border-box;display:flex;align-items:center;gap:10px;padding:9px 18px 9px 14px;border-radius:20px;background:#ffffff;color:#0f172a;font-size:20px;font-weight:600;line-height:1.25;box-shadow:0 10px 28px rgba(2,6,23,.28),0 0 0 1px rgba(15,23,42,.06);opacity:${kk.toFixed(3)};${extra}">
+    <span style="flex:none;width:10px;height:10px;border-radius:50%;background:${B.accent};box-shadow:0 0 0 3px ${alpha(B.accent, 0.25)}"></span><span>${esc(sc.callout)}</span></div>`;
+  const dot = (cx, cy) => `<div style="position:absolute;left:${cx - 5}px;top:${cy - 5}px;width:10px;height:10px;border-radius:50%;background:${B.accent};opacity:${kk.toFixed(3)}"></div>`;
+  if (room >= 200 && !TL.slide) {
+    const left = X + bw / 2 < x + w / 2, pw = Math.min(natural, room), cy = clamp(Y + bh / 2, y + 30, y + h - 30);
+    const edge = left ? X : X + bw, from = left ? x - 16 : x + w + 16;
+    const lines = natural > room ? 2 : 1, ph = lines * 25 + 18;
+    html += `<div style="position:absolute;left:${Math.min(edge, from)}px;top:${cy - 1}px;width:${Math.abs(edge - from)}px;height:2px;background:${line};transform-origin:${left ? "0" : "100%"} 0;transform:scaleX(${kk.toFixed(3)})"></div>`;
+    html += dot(edge, cy);
+    html += pill(left ? from - pw : from, cy - ph / 2, pw, `${lines === 1 ? "white-space:nowrap;" : ""}transform:translateX(${((1 - kk) * (left ? -10 : 10)).toFixed(2)}px)`);
+  } else {
+    const below = y + h + 14, pw = natural, cx = clamp(X + 30, x + 14, x + w - 14);
+    const left = clamp(cx - 24, x, x + w - pw);
+    html += `<div style="position:absolute;left:${cx - 1}px;top:${Y + bh}px;width:2px;height:${Math.max(0, (below - Y - bh) * kk)}px;background:${line}"></div>`;
+    html += dot(cx, Y + bh);
+    html += pill(left, below, 0, `white-space:nowrap;transform:translateY(${((1 - kk) * 8).toFixed(2)}px)`);
+  }
+  return html;
+}
+
+// ---- the chapter bar: one segment per step, the current one filling
+function chapters(t, x0, x1, y, k) {
+  const N = TL.scenes.length, gap = 12, sw = (x1 - x0 - gap * (N - 1)) / N;
+  return `<div style="position:absolute;left:${x0}px;top:${y}px;width:${x1 - x0}px;display:flex;gap:${gap}px;opacity:${k.toFixed(3)}">` +
+    TL.scenes.map((s) => {
+      const p = t >= s.end ? 1 : clamp((t - s.start) / (s.end - s.start)), now = t >= s.start && t < s.end;
+      return `<div style="width:${sw}px"><div style="height:4px;border-radius:2px;background:${FAINT};overflow:hidden">
+        <div style="height:100%;width:${(p * 100).toFixed(2)}%;background:${now ? B.accent : alpha(LIGHT ? "#0f172a" : "#ffffff", 0.5)}"></div></div>
+        <div class="i" style="margin-top:10px;font-size:15px;font-weight:${now ? 600 : 500};color:${now ? INK : MUTED};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(plain(s.chapter ?? s.title))}</div></div>`;
+    }).join("") + "</div>";
+}
+
+window.render = (t) => {
+  let html = "";
+  frame.style.display = "none";
+  fade.style.background = "none";
+  const sc = TL.scenes.find((s) => t >= s.start && t < s.end);
+  const endStart = TL.total - TL.end.len, N = TL.scenes.length;
+
+  if (TL.slide) {  // one scene alone: the frame, the camera, no title; fades from and to the ground
+    if (sc) html = footage(sc, t, html);
+    const f = TL.slide.fade ?? 0.4, last = TL.total - 1 / FPS;
+    fade.style.background = G;
+    fade.style.opacity = (1 - Math.min(clamp(t / f), clamp((last - t) / f))).toFixed(3);
+    over.innerHTML = html;
+    return;
+  }
+  fade.style.opacity = 0;
+
+  if (t < TL.intro.len) {
+    const L = TL.intro.len, out = L - t, I = TL.intro;
+    const kicker = String(I.alert ?? "").replace(/^[●•\s]+/, "");
+    const tsize = fitPx(plain(I.title), "600 {} 'Inter Tight'", W * 0.8, I.size ?? 128);
+    html += `<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:26px">
+      ${kicker ? `<div class="cap" style="font-size:18px;color:${ACC};${glide(t - 0.1, out)}">${esc(kicker)}</div>` : ""}
+      <div class="t" style="font-size:${tsize}px;${glide(t - 0.25, out, 0.9, 22)}">${titleHtml(I.title)}</div>
+      <div style="height:3px;border-radius:2px;background:${B.accent};width:${(ease((t - 0.6) / 0.6) * 72).toFixed(1)}px;opacity:${clamp(out / 0.3)}"></div>
+      ${I.sub ? `<div class="i" style="font-size:30px;font-weight:400;color:${MUTED};max-width:${W * 0.7}px;${glide(t - 0.55, out)}">${esc(I.sub)}</div>` : ""}</div>`;
+  } else if (sc) {
+    const lt = t - sc.start, out = sc.end - t, [x, y, w, h] = sc.rect, lay = sc.layout ?? "above";
+    html = footage(sc, t, html);
+    const label = `Step ${sc.n} of ${N}`;
+    const fwd = (sc.ff ?? []).find(([a, b]) => t >= a && t < b);
+    const chip = fwd ? `<div class="i" style="display:inline-flex;align-items:center;gap:6px;font-size:15px;font-weight:600;color:${MUTED};border:1px solid ${FAINT};border-radius:999px;padding:4px 12px;opacity:${(clamp((t - fwd[0]) / 0.1) * clamp((fwd[1] - t) / 0.1)).toFixed(3)}">
+      ${[0, 1].map((i) => `<span style="opacity:${i === Math.floor(t * 8) % 2 ? 1 : 0.35}">›</span>`).join("")} ${fwd[2]}×</div>` : "";
+    if (lay === "beside") {
+      const colX = 96, colW = x - 64 - colX, ts = Math.min(64, fitPx(plain(sc.title).split(" ").reduce((m, s) => (s.length > m.length ? s : m), ""), "600 {} 'Inter Tight'", colW, 64));
+      html += `<div style="position:absolute;left:${colX}px;width:${colW}px;top:${y - BAR}px;height:${h + BAR}px;display:flex;flex-direction:column;justify-content:center;gap:20px">
+        <div class="cap" style="font-size:16px;color:${ACC};${glide(lt - 0.05, out)}">${label}</div>
+        <div class="t" style="font-size:${ts}px;${glide(lt - 0.15, out, 0.75, 18)}">${titleHtml(sc.title)}</div>
+        <div class="i" style="font-size:25px;line-height:1.42;color:${MUTED};${glide(lt - 0.35, out)}">${esc(sc.sub)}</div>
+        <div style="min-height:30px">${chip}</div></div>`;
+      html += chapters(t, colX, x + w, H - 64, clamp((t - TL.intro.len) / 0.4) * clamp((endStart - t) / 0.3));
+    } else {
+      const top = y - BAR, ts = fitPx(plain(sc.title), "600 {} 'Inter Tight'", w - 220, 52);
+      html += `<div style="position:absolute;left:${x}px;width:${w}px;bottom:${H - top + 26}px;display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;min-height:28px"><div class="cap" style="font-size:16px;color:${ACC};${glide(lt - 0.05, out)}">${label}</div>${chip}</div>
+        <div class="t" style="font-size:${ts}px;white-space:nowrap;${glide(lt - 0.15, out, 0.75, 18)}">${titleHtml(sc.title)}</div>
+        <div class="i" style="font-size:24px;line-height:1.38;color:${MUTED};${glide(lt - 0.35, out)}">${esc(sc.sub)}</div></div>`;
+      html += chapters(t, x, x + w, y + h + 26, clamp((t - TL.intro.len) / 0.4) * clamp((endStart - t) / 0.3));
+    }
+  } else if (t >= endStart) {
+    const lt = t - endStart, E = TL.end;
+    html += `<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:30px;text-align:center">
+      <div id="endlogo" style="display:flex;align-items:center;gap:24px;${glide(lt - 0.05, Infinity, 0.8, 20)}">${E.logoHtml ?? ""}</div>
+      ${E.line ? `<div class="t" style="font-size:${fitPx(E.line, "600 {} 'Inter Tight'", W * 0.8, 60)}px;color:${INK};${glide(lt - 0.4, Infinity, 0.8)}">${esc(E.line)}</div>` : ""}
+      ${E.url ? `<div class="i" style="font-size:28px;font-weight:500;color:${ACC};${glide(lt - 0.75, Infinity, 0.7)}">${esc(E.url)}</div>` : ""}</div>`;
+  }
+  over.innerHTML = html;
+  if (t >= endStart) applyBlink(over, t - endStart);
+};
+</script></body></html>

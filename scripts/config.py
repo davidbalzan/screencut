@@ -35,10 +35,12 @@ TITLE_SPEC = TITLE  # "TEXT" or [["TEXT ", ""], ["ACCENT", "a"]]
 SCENE = obj({"clip": STR, "kind": enum("desk", "wide", "phone", "full"), "rect": arr(NUM, 4), "crop": arr(NUM, 4), "cam": STR,
              "title": TITLE_SPEC, "sub": STR, "titleSize": NUM, "speed": NUM, "fastForward": BOOL,
              "ramps": arr(obj({"from": NUM, "to": NUM, "speed": NUM}, ["from", "to", "speed"])),
-             "fit": enum("full", "content"), "layout": enum("split", "cards", "window")}, ["clip", "title"])
+             "fit": enum("full", "content"), "layout": STR,
+             "focus": arr(NUM, 4), "zoom": NUM, "callout": STR, "chapter": STR}, ["clip", "title"])
 SPEC = obj({
     "out": STR, "clips": FILE, "work": STR, "speed": NUM, "mode": enum("tutorial", "trailer"), "style": ("style",), "fastForward": BOOL,
-    "fit": enum("full", "content"), "layout": enum("split", "cards", "window"),
+    "fit": enum("full", "content"), "layout": STR, "zoom": NUM,
+    "exports": obj({"slides": BOOL, "aspect": enum("16:9", "4:3")}),
     "brand": obj({"accent": HEX, "alert": HEX, "glow": HEX, "site": STR, "date": STR, "clock": STR,
                   "ground": HEX, "palette": arr(HEX)}),
     "intro": obj({"len": NUM, "alert": STR, "title": TITLE_SPEC, "sub": STR, "size": NUM}),
@@ -51,7 +53,7 @@ SPEC = obj({
     "checks": obj({"maxHold": NUM, "maxStill": NUM, "minEndHold": NUM, "transcribe": BOOL, "minVoiceMatch": NUM,
                    "stt": enum("elevenlabs", "google")}),
 }, ["scenes"])
-MUSIC = obj({"file": FILE, "sync": enum("beat", "bar"), "bpm": NUM, "offset": NUM, "barOffset": INT,
+MUSIC = obj({"file": FILE, "sync": enum(True, "beat", "bar"), "bpm": NUM, "offset": NUM, "barOffset": INT,
              "fadeIn": NUM, "fadeOut": NUM, "volume": NUM}, ["file"])
 
 
@@ -119,6 +121,9 @@ def validate(cfg, p):
     check(cfg, SPEC, "video")
     if isinstance(cfg.get("scenes"), list) and not cfg["scenes"]:
         errs.append("video.scenes: needs at least one scene")
+    for at, z in [("video.zoom", cfg.get("zoom"))] + [(f"video.scenes[{i}].zoom", s.get("zoom")) for i, s in enumerate(cfg.get("scenes") or []) if isinstance(s, dict)]:
+        if isinstance(z, (int, float)) and not 1 <= z <= 4:
+            errs.append(f"{at}: the closest zoom, 1 (no zoom) to 4, got {z}")
     if isinstance(cfg.get("speed"), (int, float)) and cfg["speed"] <= 0:
         errs.append("video.speed: must be above 0")
     for i, s in enumerate(cfg.get("scenes") if isinstance(cfg.get("scenes"), list) else []):
@@ -135,10 +140,20 @@ def validate(cfg, p):
         errs.append(f"video.brand.clock: expected HH:MM:SS, got {clock!r}")
     if cfg.get("style", "heist") in styles() and isinstance(cfg.get("scenes"), list):
         st = load_style(cfg.get("style", "heist"))
-        for i, s in enumerate(cfg["scenes"]):  # hud styles (kinetic) place footage by frame, not kind
+        for i, s in enumerate(cfg["scenes"]):  # hud styles (kinetic, keynote, social) place footage by layout, not kind
             k = s.get("kind") if isinstance(s, dict) else None
             if k in SCENE[1]["kind"][1] and st["footage"] == "canvas" and k not in st["rects"]:
                 errs.append(f"video.scenes[{i}].kind: style {st['name']!r} has no {k!r}; kinds: {', '.join(st['rects'])}")
+        lays = st.get("layouts", {})
+        for at, v in [("video.layout", cfg.get("layout"))] + [(f"video.scenes[{i}].layout", s.get("layout")) for i, s in enumerate(cfg["scenes"]) if isinstance(s, dict)]:
+            if isinstance(v, str) and v not in lays:
+                errs.append(f"{at}: style {st['name']!r} has " + (f"no layout {v!r}; layouts: {', '.join(lays)}" if lays else "no layouts"))
+        for i, s in enumerate(cfg["scenes"]):
+            if isinstance(s, dict) and (s.get("focus") or s.get("callout")) and not st.get("camera"):
+                errs.append(f"video.scenes[{i}]: focus and callout need a style with a camera (keynote, social); {st['name']!r} has none")
+        exp = cfg.get("exports") if isinstance(cfg.get("exports"), dict) else {}
+        if exp.get("slides") and st["footage"] != "hud":
+            errs.append(f"video.exports.slides: style {st['name']!r} can't export slides (keynote can)")
     clips_path = p(cfg.get("clips", "clips/clips.json")) if isinstance(cfg.get("clips", ""), str) else None
     if clips_path and os.path.exists(clips_path) and isinstance(cfg.get("scenes"), list):
         names = {c.get("name") for c in json.load(open(clips_path))}
