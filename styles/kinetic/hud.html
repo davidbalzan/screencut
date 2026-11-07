@@ -108,13 +108,65 @@ window.render = (t) => {
         <div class="inter" style="font-weight:600;font-size:30px;letter-spacing:.06em;color:rgba(251,251,247,.86)">${typing(TL.intro.sub ?? "", (lt - 0.25) / 1.1, "|")}</div></div>`;
       bg = null;
     }
+  } else if (sc && sc.kind === "type") {
+    // Type only (manifesto and vision beats): a full-frame palette ground; the title in two
+    // halves on two beats; lines slamming in one per beat, then struck through one by one; the
+    // `then` slamming in their place on the dark ground; chips as bold pills, one per beat.
+    const C = sc.cues, ls = sc.lines ?? [], chips = sc.chips ?? [];
+    if (sc.then && t >= C.then) {
+      bg = "dark"; ground.style.background = groundCss(pop(sc.n - 1));
+      const toks = words(sc.then), R = bigRows(toks.map((k) => k.w).join(" "), 1640, 290);
+      let at = 0;
+      html += `<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center">
+        <div class="k" style="font-size:${R.size}px;line-height:.92;${slam(t - C.then)}">${R.rows.map((r) => {
+          const row = toks.slice(at, (at += r.split(" ").length));
+          return `<div>${row.map((k) => paint(k, "#fbfbf7", pop(0))).join(" ")}</div>`;
+        }).join("")}</div>
+        <div style="margin-top:44px;height:10px;border-radius:5px;background:${pop(sc.n)};width:${(ease((t - C.then - 0.12) / 0.35) * 240).toFixed(1)}px"></div></div>`;
+    } else {
+      bg = P[(sc.n - 1) % P.length];
+      const c = on(bg), [a, b] = sc.title ? halves(sc.title) : ["", ""];
+      const sub = sc.sub ?? "", subAt = sc.title ? C.title[1] + 0.15 : sc.start + 0.2;
+      const subP = (t - subAt) / clamp(Math.min(0.028 * sub.length, sc.end - subAt - 1.2), 0.3, 1.4);
+      const subHtml = sub ? `<div class="inter" style="font-weight:600;font-size:40px;line-height:1.3;max-width:1500px;color:${c};opacity:.88">${typing(sub, subP, "|")}</div>` : "";
+      let col = "";
+      if (ls.length) {
+        // the title as a header line, the lines big under it
+        if (a || b) col += `<div class="k" style="font-size:${fitSize(`${a} ${b}`, 1500, 104)}px;color:${c};display:flex;gap:.26em;transform-origin:0 50%">
+          ${[a, b].filter(Boolean).map((h, j) => `<span style="display:inline-block;transform-origin:0 50%;${slam(t - C.title[j], 1.3)}">${esc(h)}</span>`).join("")}</div>`;
+        const longest = ls.reduce((m, x) => (x.length > m.length ? x : m), "");
+        const room = 1080 - 140 - (a || b ? 140 : 0) - (sub ? 84 : 0);
+        const size = Math.min(Math.floor(fitSize(longest, 1700, 250) / 1.12), Math.floor(room / (ls.length * 0.98)));
+        col += `<div style="display:flex;flex-direction:column;gap:${Math.round(size * 0.1)}px;margin:${a || b ? 34 : 0}px 0 ${sub ? 30 : 0}px">${ls.map((w, i) => {
+          const k = struck(sc, i, t);
+          return `<div class="k" style="font-size:${size}px;color:${c};transform-origin:0 50%;${slam(t - C.lines[i], 1.12)}">
+            <span style="position:relative;display:inline-block"><span style="opacity:${(1 - 0.58 * clamp(k * 2)).toFixed(3)}">${esc(w)}</span>${k > 0
+              ? `<span style="position:absolute;left:-.05em;top:57%;height:.12em;margin-top:-.06em;width:${(108 * k).toFixed(1)}%;transform:rotate(-2.5deg);transform-origin:0 50%;background:${c};border-radius:.06em"></span>` : ""}</span></div>`;
+        }).join("")}</div>`;
+        col += subHtml;
+      } else {
+        // the title in two halves, big, stacked; chips under it
+        const small = chips.length ? 0.78 : 1;
+        if (a) col += `<div class="k" style="font-size:${Math.floor(fitSize(a, 1700, 190) * small)}px;color:${c};transform-origin:0 50%;${slam(t - C.title[0])}">${esc(a)}</div>`;
+        if (b) col += `<div class="k" style="margin-top:18px;font-size:${Math.floor(fitSize(b, 1700, 330) * small)}px;color:${c};transform-origin:0 50%;${slam(t - C.title[a ? 1 : 0])}">${esc(b)}</div>`;
+        if (sub) col += `<div style="margin-top:30px">${subHtml}</div>`;
+      }
+      if (chips.length) {
+        // bold pills, sized so the row fits two lines at most
+        const w100 = chips.reduce((m, x) => m + textWidth(x.toUpperCase(), `900 100px "Inter Tight"`) + 140 + 22, 0);
+        const px = clamp(Math.floor((1700 * 1.75 / w100) * 100), 30, 84);
+        col += `<div style="margin-top:${ls.length ? 30 : 56}px;display:flex;flex-wrap:wrap;gap:22px;max-width:1700px">${chips.map((x, i) =>
+          `<div class="k" style="font-size:${px}px;line-height:1;padding:.3em .7em;border-radius:999px;background:${c};color:${bg};${slam(t - C.chips[i], 1.35)}">${esc(x)}</div>`).join("")}</div>`;
+      }
+      html += `<div style="position:absolute;left:110px;right:110px;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center">${col}</div>`;
+    }
   } else if (sc && t < sc.fstart) {
     // Lead-in: the title split in two, one half per beat, the ground flipping colour on each.
     const [a, b] = halves(sc.title);
     const ts = beatsFrom(sc.start, 2, sc.fstart), j = t >= ts[1] ? 1 : 0;
     bg = P[(sc.n - 1 + j) % P.length];
     const c = on(bg);
-    html += `<div class="tag" style="position:absolute;left:110px;top:92px;font-size:30px;color:${c};opacity:.8">${pad(sc.n)} / ${pad(TL.scenes.length)}</div>`;
+    html += `<div class="tag" style="position:absolute;left:110px;top:92px;font-size:30px;color:${c};opacity:.8">${pad(sc.step ?? sc.n)} / ${pad(TL.steps ?? TL.scenes.length)}</div>`;
     html += `<div style="position:absolute;left:110px;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center;gap:18px">
       ${a ? `<div class="k" style="font-size:${fitSize(a, 1700, 190)}px;color:${c};transform-origin:0 50%;${slam(t - ts[0])}">${esc(a)}</div>` : ""}
       ${b ? `<div class="k" style="font-size:${fitSize(b, 1700, 330)}px;color:${c};transform-origin:0 50%;${slam(t - ts[a ? 1 : 0])}">${esc(b)}</div>` : ""}</div>`;
@@ -138,7 +190,7 @@ window.render = (t) => {
     const sub = sc.sub ?? "", typeAt = 0.3, typeFor = clamp(Math.min(0.028 * sub.length, L - typeAt - 1.2), 0.3, 1.6);
     const subP = (ft - typeAt) / typeFor;
     const caret = `<span style="color:${hue2}">|</span>`;
-    const tag = (size, extra = "") => `<div class="tag" style="font-size:${size}px;color:${hue2};${extra}">${pad(sc.n)} / ${pad(TL.scenes.length)}</div>`;
+    const tag = (size, extra = "") => `<div class="tag" style="font-size:${size}px;color:${hue2};${extra}">${pad(sc.step ?? sc.n)} / ${pad(TL.steps ?? TL.scenes.length)}</div>`;
     const fwd = (sc.ff ?? []).find(([a, b]) => t >= a && t < b);
     const chip = (size) => {  // the fast-forward cue: speed and chevrons that chase each other
       if (!fwd) return "";

@@ -46,6 +46,44 @@ function brackets([x, y, w, h], p) {
   return `<div style="opacity:${ease(p * 1.4)}">${corner(X, Y, 1, 1)}${corner(X + W, Y, -1, 1)}${corner(X, Y + H, 1, -1)}${corner(X + W, Y + H, -1, -1)}</div>`;
 }
 
+// The REC light, a label and the running timestamp along the top.
+function rec(t, f, label) {
+  const blink = Math.floor(t * 2) % 2 === 0;
+  const [hh, mm, ss] = (B.clock ?? "04:21:07").split(":").map(Number);
+  const secs = hh * 3600 + mm * 60 + ss + t;
+  return `<div class="mono" style="position:absolute;left:90px;top:22px;font-size:20px;letter-spacing:.14em;color:#cbd5e1;display:flex;gap:26px;align-items:center">
+      <span style="color:${B.alert};opacity:${blink ? 1 : 0.25}">● REC</span><span>${esc(label)}</span><span style="color:#64748b">${esc(B.site)}</span></div>
+    <div class="mono" style="position:absolute;right:60px;top:22px;font-size:20px;letter-spacing:.1em;color:#64748b">${esc(B.date)} ${pad(Math.floor(secs / 3600) % 24)}:${pad(Math.floor(secs / 60) % 60)}:${pad(Math.floor(secs) % 60)}:${pad(f % 30)}</div>`;
+}
+
+// A type scene (no footage): text decoding on the dark canvas. The title decodes, the lines
+// one by one, each then cut by a red line; `then` decodes in their place; chips type in as
+// bracketed tags. Sizes fit the frame (Oswald is measured, common.js textWidth).
+function typeScene(sc, t) {
+  const C = sc.cues, ls = sc.lines ?? [], chips = sc.chips ?? [];
+  const plain = (x) => (typeof x === "string" ? x : x.map(([s]) => s).join("")).toUpperCase();
+  const fit = (text, maxW, maxPx, weight = 700) => Math.min(maxPx, Math.floor((maxW / Math.max(textWidth(text, `${weight} 100px Oswald`), 1)) * 100));
+  const area = "position:absolute;left:120px;right:120px;top:90px;bottom:60px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:22px";
+  if (sc.then && t >= C.then) {
+    return `<div style="${area}"><div class="mono" style="font-size:22px;letter-spacing:.3em;color:${B.alert}">${typed("> DECRYPTED", (t - C.then) / 0.3)}</div>
+      <div class="osw" style="font-weight:700;font-size:${fit(plain(sc.then), 1500, 190)}px;line-height:1;color:#fafafa">${decode(sc.then, clamp((t - C.then) / 0.7), 91)}</div></div>`;
+  }
+  let col = "";
+  if (sc.title) col += `<div class="osw" style="font-weight:700;font-size:${fit(plain(sc.title), 1500, ls.length ? 96 : 150)}px;line-height:1.02;color:#fafafa">${decode(sc.title, clamp((t - C.title[0]) / 0.8), sc.n * 31)}</div>`;
+  if (sc.sub) col += `<div class="inter" style="font-size:30px;line-height:1.38;color:#94a3b8;min-height:42px">${typed(sc.sub, clamp((t - C.title[1]) / 1.0))}</div>`;
+  if (ls.length) {
+    const size = Math.min(fit(ls.reduce((m, s) => (s.length > m.length ? s : m), "").toUpperCase(), 1200, 110, 500), Math.floor(560 / (ls.length * 1.15)));
+    col += `<div style="display:flex;flex-direction:column;align-items:center;gap:${Math.round(size * 0.12)}px;margin-top:18px">${ls.map((s, i) => {
+      const k = struck(sc, i, t, 0.2);
+      return `<div class="osw" style="position:relative;font-weight:500;font-size:${size}px;line-height:1.08;letter-spacing:.06em;color:${k > 0 ? "#64748b" : "#e2e8f0"};opacity:${t < C.lines[i] ? 0 : 1}">${decode(s, clamp((t - C.lines[i]) / 0.45), sc.n * 53 + i * 17)}${k > 0
+        ? `<div style="position:absolute;left:-3%;top:52%;height:5px;width:${(106 * k).toFixed(1)}%;background:${B.alert};box-shadow:0 0 12px ${B.alert}"></div>` : ""}</div>`;
+    }).join("")}</div>`;
+  }
+  if (chips.length) col += `<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:18px 26px;max-width:1500px;margin-top:26px">${chips.map((c, i) =>
+    `<div class="mono" style="font-size:30px;letter-spacing:.12em;color:${B.accent};border:2px solid ${t < C.chips[i] ? "transparent" : B.accent + "88"};padding:10px 20px;opacity:${t < C.chips[i] ? 0 : 1}">[ ${typed(c.toUpperCase(), (t - C.chips[i]) / 0.35)} ]</div>`).join("")}</div>`;
+  return `<div style="${area}">${col}</div>`;
+}
+
 window.render = (t) => {
   let html = "";
   const inIntro = t < TL.intro.len, inEnd = t >= TL.total - TL.end.len;
@@ -65,15 +103,11 @@ window.render = (t) => {
       <div class="mono" style="font-size:28px;letter-spacing:.18em;color:#94a3b8;opacity:${ease((t - 1.4) / 0.6)}">${esc(TL.intro.sub)}</div></div>`;
   }
 
-  if (sc) {
+  if (sc && sc.kind === "type") {
+    html += rec(t, f, "INTERCEPT") + typeScene(sc, t);
+  } else if (sc) {
     const lt = t - sc.start;
-    html += brackets(sc.rect, lt / 0.55);
-    const blink = Math.floor(t * 2) % 2 === 0;
-    const [hh, mm, ss] = (B.clock ?? "04:21:07").split(":").map(Number);
-    const secs = hh * 3600 + mm * 60 + ss + t;
-    html += `<div class="mono" style="position:absolute;left:90px;top:22px;font-size:20px;letter-spacing:.14em;color:#cbd5e1;display:flex;gap:26px;align-items:center">
-      <span style="color:${B.alert};opacity:${blink ? 1 : 0.25}">● REC</span><span>${esc(sc.cam)}</span><span style="color:#64748b">${esc(B.site)}</span></div>`;
-    html += `<div class="mono" style="position:absolute;right:60px;top:22px;font-size:20px;letter-spacing:.1em;color:#64748b">${esc(B.date)} ${pad(Math.floor(secs / 3600) % 24)}:${pad(Math.floor(secs / 60) % 60)}:${pad(Math.floor(secs) % 60)}:${pad(f % 30)}</div>`;
+    html += brackets(sc.rect, lt / 0.55) + rec(t, f, sc.cam);
     const panelX = sc.rect[0] + sc.rect[2] + 96;
     html += `<div style="position:absolute;left:${panelX}px;top:0;width:${1860 - panelX}px;height:1080px;display:flex;flex-direction:column;justify-content:center;gap:24px">
       <div class="mono" style="font-size:22px;letter-spacing:.24em;color:${B.accent}">${typed(`> STEP ${pad(sc.n)} // ${pad(TL.scenes.length)}`, lt / 0.45)}</div>

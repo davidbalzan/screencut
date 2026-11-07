@@ -19,6 +19,27 @@ const lum = (h) => { const [r, g, b] = rgb(h).map((v) => { v /= 255; return v <=
 const _measure = document.createElement("canvas").getContext("2d");
 const textWidth = (text, font) => { _measure.font = font; return _measure.measureText(String(text)).width; };
 
+// Big uppercase type (Inter Tight) on up to two lines: { size, rows }, the size at which the
+// longer row fits maxW (kinetic, social).
+function bigRows(text, maxW, maxPx, weight = 900) {
+  const font = (px) => `${weight} ${px}px "Inter Tight"`, up = text.toUpperCase();
+  const one = Math.floor((maxW / Math.max(textWidth(up, font(100)), 1)) * 100);
+  if (one >= maxPx * 0.72 || !up.includes(" ")) return { size: Math.min(maxPx, one), rows: [text] };
+  const ws = text.split(" ");
+  let best = null;
+  for (let i = 1; i < ws.length; i++) {
+    const r = [ws.slice(0, i).join(" "), ws.slice(i).join(" ")];
+    const wd = Math.max(...r.map((s) => textWidth(s.toUpperCase(), font(100))));
+    if (!best || wd < best.wd) best = { wd, rows: r };
+  }
+  return { size: Math.min(maxPx, Math.floor((maxW / best.wd) * 100)), rows: best.rows };
+}
+
+// Type scenes (kind "type", no footage): sc.cues holds timeline seconds from build.py
+// ({title: [a, b], lines: [], strike: [], then, chips: [], settled}). The share of a strike
+// drawn across line i at t, 0 before its cue.
+const struck = (sc, i, t, dur = 0.16) => (sc.strike && sc.cues.strike[i] != null ? clamp((t - sc.cues.strike[i]) / dur) : 0);
+
 // Footage frames drawn by the HUD (kinetic, keynote, social): the src of a scene's frame at t.
 const frameSrc = (sc, t, fps = 30) => sc.frames ? `file://${sc.frames.dir}/${pad(clamp(Math.floor((t - sc.start) * fps + 1e-6), 0, sc.frames.n - 1), 5)}.jpg` : null;
 

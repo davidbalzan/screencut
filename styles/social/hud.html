@@ -35,20 +35,6 @@ function slam(dt, from = 1.25) {
   const e = 1 - Math.pow(1 - clamp(dt / 0.2), 4);
   return `transform:scale(${(from - (from - 1) * e).toFixed(4)});filter:blur(${((1 - e) * 8).toFixed(2)}px)`;
 }
-// Big type on up to two lines: the size at which the longer line fits maxW.
-function lines(text, maxW, maxPx, weight = 900) {
-  const font = (px) => `${weight} ${px}px "Inter Tight"`, up = text.toUpperCase();
-  const one = Math.floor((maxW / Math.max(textWidth(up, font(100)), 1)) * 100);
-  if (one >= maxPx * 0.72 || !up.includes(" ")) return { size: Math.min(maxPx, one), rows: [text] };
-  const ws = text.split(" ");
-  let best = null;
-  for (let i = 1; i < ws.length; i++) {
-    const r = [ws.slice(0, i).join(" "), ws.slice(i).join(" ")];
-    const wd = Math.max(...r.map((s) => textWidth(s.toUpperCase(), font(100))));
-    if (!best || wd < best.wd) best = { wd, rows: r };
-  }
-  return { size: Math.min(maxPx, Math.floor((maxW / best.wd) * 100)), rows: best.rows };
-}
 // A title's words keep their accent parts: [["SAY WHAT ", ""], ["YOU WANT", "a"]].
 function painted(title, rows, accent) {
   const acc = new Set();
@@ -73,6 +59,44 @@ function caption(t) {
     <div>${ws.map(([w], i) => `<span style="color:${i === k && !done ? B.accent : i <= k ? "#fbfbf7" : "rgba(251,251,247,.5)"};">${esc(w)}</span>`).join(" ")}</div></div>`;
 }
 
+// Progress: one segment per scene, under the captions.
+const progress = (t, sc, hue) => `<div style="position:absolute;left:40px;right:40px;top:1850px;display:flex;gap:10px">${TL.scenes.map((s) =>
+  `<div style="flex:1;height:8px;border-radius:4px;background:rgba(255,255,255,.14);overflow:hidden"><div style="height:100%;width:${((t >= s.end ? 1 : clamp((t - s.start) / (s.end - s.start))) * 100).toFixed(1)}%;background:${s === sc ? hue : "rgba(255,255,255,.6)"}"></div></div>`).join("")}</div>`;
+
+// A type scene (no footage): big words above the caption band. The title slams in (a row per
+// beat), the lines one per beat, struck through one by one in the scene's colour, then `then`
+// slams in their place; chips are bold pills in the palette, one per beat.
+function typeScene(sc, t) {
+  const C = sc.cues, ls = sc.lines ?? [], chips = sc.chips ?? [], hue = pop(sc.n - 1);
+  const area = "position:absolute;left:60px;right:60px;top:120px;height:1360px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center";
+  if (sc.then && t >= C.then) {
+    const R = bigRows(plain(sc.then), 960, 260);
+    return `<div style="${area}"><div class="k" style="font-size:${R.size}px;${slam(t - C.then)}">${painted(sc.then, R.rows, hue)}</div>
+      <div style="margin-top:44px;height:12px;border-radius:6px;background:${pop(sc.n)};width:${(ease((t - C.then - 0.12) / 0.35) * 220).toFixed(1)}px"></div></div>`;
+  }
+  let col = "";
+  if (sc.title) {
+    const R = bigRows(plain(sc.title), 960, ls.length ? 120 : 190);
+    col += R.rows.map((r, j) => `<div class="k" style="font-size:${R.size}px;${slam(t - C.title[Math.min(j, 1)])}">${painted(sc.title, [r], hue)}</div>`).join("");
+  }
+  if (sc.sub) col += `<div class="inter" style="margin-top:28px;font-weight:600;font-size:40px;line-height:1.3;color:rgba(251,251,247,.85);${slam(t - C.title[1] - 0.15, 1.08)}">${esc(sc.sub)}</div>`;
+  if (ls.length) {
+    const longest = ls.reduce((m, s) => (s.length > m.length ? s : m), "");
+    const size = Math.min(Math.floor(bigRows(longest, 900, 220).size / 1.12), Math.floor(900 / (ls.length * 1.02)));
+    col += `<div style="margin-top:46px;display:flex;flex-direction:column;align-items:center;gap:${Math.round(size * 0.08)}px">${ls.map((s, i) => {
+      const k = struck(sc, i, t);
+      return `<div class="k" style="font-size:${size}px;${slam(t - C.lines[i], 1.12)}"><span style="position:relative;display:inline-block">
+        <span style="color:#fbfbf7;opacity:${(1 - 0.6 * clamp(k * 2)).toFixed(3)}">${esc(s)}</span>${k > 0
+        ? `<span style="position:absolute;left:-.05em;top:55%;height:.12em;margin-top:-.06em;width:${(108 * k).toFixed(1)}%;transform:rotate(-3deg);transform-origin:0 50%;background:${hue};border-radius:.06em"></span>` : ""}</span></div>`;
+    }).join("")}</div>`;
+  }
+  if (chips.length) col += `<div style="margin-top:56px;display:flex;flex-wrap:wrap;justify-content:center;gap:20px">${chips.map((c, i) => {
+    const bg = pop(sc.n - 1 + i);
+    return `<div class="k" style="font-size:60px;line-height:1;padding:.3em .66em;border-radius:999px;background:${bg};color:${on(bg)};${slam(t - C.chips[i], 1.3)}">${esc(c)}</div>`;
+  }).join("")}</div>`;
+  return `<div style="${area}">${col}</div>`;
+}
+
 window.render = (t) => {
   let html = "";
   win.style.display = "none";
@@ -81,12 +105,14 @@ window.render = (t) => {
 
   if (t < TL.intro.len) {
     // The hook: the title lands in the first frames, big, with the kicker and the line.
-    const I = TL.intro, L = lines(plain(I.title), 960, 230), kicker = String(I.alert ?? "").replace(/^[●•\s]+/, "");
+    const I = TL.intro, L = bigRows(plain(I.title), 960, 230), kicker = String(I.alert ?? "").replace(/^[●•\s]+/, "");
     html += `<div style="position:absolute;left:60px;right:60px;top:0;height:1480px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:40px;text-align:center">
       ${kicker ? `<div class="tag" style="font-size:30px;color:${pop(1)};${slam(t - 0.1, 1.15)}">${esc(kicker)}</div>` : ""}
       <div class="k" style="font-size:${L.size}px;${slam(t)}">${painted(I.title, L.rows, pop(0))}</div>
       <div style="height:12px;width:${(ease((t - 0.15) / 0.35) * 220).toFixed(1)}px;border-radius:6px;background:${pop(1)}"></div>
       ${I.sub ? `<div class="inter" style="font-weight:600;font-size:40px;line-height:1.3;color:rgba(251,251,247,.88);${slam(t - 0.3, 1.1)}">${esc(I.sub)}</div>` : ""}</div>`;
+  } else if (sc && sc.kind === "type") {
+    html += typeScene(sc, t) + progress(t, sc, pop(sc.n - 1));
   } else if (sc) {
     const lt = t - sc.start, [x, y, w, h] = sc.rect, hue = pop(sc.n - 1);
     // the footage, in its window, the crop panning after the action
@@ -96,18 +122,16 @@ window.render = (t) => {
     if (src) { if (img.getAttribute("src") !== src) img.setAttribute("src", src); } else img.removeAttribute("src");
     showView(img, sc, viewAt(sc, t), w);
     // the title band above it
-    const L = lines(plain(sc.title), 1000, 112);
+    const L = bigRows(plain(sc.title), 1000, 112);
     const fwd = (sc.ff ?? []).find(([a, b]) => t >= a && t < b);
     const chip = fwd ? `<div class="tag" style="display:inline-block;font-size:26px;letter-spacing:.08em;padding:8px 18px;border-radius:999px;background:${hue};color:${on(hue)};opacity:${(clamp((t - fwd[0]) / 0.08) * clamp((fwd[1] - t) / 0.08)).toFixed(3)}">
       ${[0, 1, 2].map((i) => `<span style="opacity:${i === Math.floor(t * 12) % 3 ? 1 : 0.35}">›</span>`).join("")}&nbsp;${fwd[2]}×</div>` : "";
     html += `<div style="position:absolute;left:40px;right:40px;top:96px;height:${y - 96 - 36}px;display:flex;flex-direction:column;justify-content:flex-end;gap:22px">
-      <div style="display:flex;align-items:center;justify-content:space-between;height:52px"><div class="tag" style="font-size:30px;color:${hue};${slam(lt, 1.1)}">${pad(sc.n)} / ${pad(N)}</div>${chip}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;height:52px"><div class="tag" style="font-size:30px;color:${hue};${slam(lt, 1.1)}">${pad(sc.step ?? sc.n)} / ${pad(TL.steps ?? N)}</div>${chip}</div>
       <div class="k" style="font-size:${L.size}px;transform-origin:0 100%;${slam(lt)}">${painted(sc.title, L.rows, hue)}</div></div>`;
-    // progress: one segment per step, under the captions
-    html += `<div style="position:absolute;left:40px;right:40px;top:1850px;display:flex;gap:10px">${TL.scenes.map((s) =>
-      `<div style="flex:1;height:8px;border-radius:4px;background:rgba(255,255,255,.14);overflow:hidden"><div style="height:100%;width:${((t >= s.end ? 1 : clamp((t - s.start) / (s.end - s.start))) * 100).toFixed(1)}%;background:${s === sc ? hue : "rgba(255,255,255,.6)"}"></div></div>`).join("")}</div>`;
+    html += progress(t, sc, hue);
   } else if (t >= endStart) {
-    const lt = t - endStart, E = TL.end, L = lines(E.line ?? "", 960, 120);
+    const lt = t - endStart, E = TL.end, L = bigRows(E.line ?? "", 960, 120);
     html += `<div style="position:absolute;left:60px;right:60px;top:0;height:1480px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:48px;text-align:center">
       <div id="endlogo" style="display:flex;align-items:center;gap:26px;${slam(lt)}">${E.logoHtml ?? ""}</div>
       <div class="k" style="font-size:${L.size}px;color:#fbfbf7;${slam(lt - 0.35)}">${L.rows.map((r, i) => `<div style="color:${i === L.rows.length - 1 && L.rows.length > 1 ? pop(0) : "#fbfbf7"}">${esc(r)}</div>`).join("")}</div>

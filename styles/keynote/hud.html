@@ -72,7 +72,8 @@ function footage(sc, t, html) {
   const v = viewAt(sc, t), s = showView(cur, sc, v, w);
   // soft cut: the previous scene's last frame (at its full view) dissolves into this one
   const i = TL.scenes.indexOf(sc), pv = TL.scenes[i - 1], k = clamp((t - sc.start) / 0.35);
-  if (!TL.slide && pv && k < 1 && pv.rect.join() === sc.rect.join() && pv.frames) {
+  frame.style.opacity = !TL.slide && pv?.kind === "type" ? easeInOut(k).toFixed(3) : 1; // after a type scene the window fades in
+  if (!TL.slide && pv && k < 1 && pv.frames && pv.rect.join() === sc.rect.join()) {
     const ps = frameSrc(pv, pv.end, FPS);
     if (prev.getAttribute("src") !== ps) prev.setAttribute("src", ps);
     showView(prev, pv, viewAt(pv, pv.end), w);
@@ -112,11 +113,41 @@ function footage(sc, t, html) {
   return html;
 }
 
+// ---- a type scene (no footage): calm. The title glides in, then the lines one by one under
+// it; each is struck through by a thin accent line and fades back; `then` glides in where the
+// lines were; chips are quiet outlined pills. Everything inside box [x, y, w, h].
+function typeScene(sc, t, [x, y, w, h]) {
+  const C = sc.cues, out = sc.end - t, ls = sc.lines ?? [], chips = sc.chips ?? [], tf = "600 {} 'Inter Tight'";
+  const linesOut = sc.then ? Math.min(out, C.then + 0.3 - t) : out;  // the lines leave as `then` arrives
+  const big = !ls.length;  // without lines the title is the statement
+  let col = "";
+  if (sc.title) col += `<div class="t" style="font-size:${fitPx(plain(sc.title), tf, w * 0.9, big ? 96 : 64)}px;${glide(t - C.title[0], sc.then ? linesOut : out, 0.8, 18)}">${titleHtml(sc.title)}</div>`;
+  if (sc.sub) col += `<div class="i" style="font-size:28px;line-height:1.4;color:${MUTED};max-width:${Math.min(w, 1100)}px;${glide(t - C.title[1] - 0.15, sc.then ? linesOut : out)}">${esc(sc.sub)}</div>`;
+  if (ls.length) {
+    const longest = ls.reduce((m, s) => (s.length > m.length ? s : m), "");
+    const size = Math.min(fitPx(longest, tf, w * 0.7, 88), Math.floor((h - (sc.title ? 150 : 0) - (sc.sub ? 60 : 0)) / (ls.length * 1.3)));
+    col += `<div style="display:flex;flex-direction:column;align-items:center;gap:${Math.round(size * 0.22)}px;margin-top:22px">${ls.map((s, i) => {
+      const k = struck(sc, i, t, 0.4), e = easeInOut(k);
+      return `<div class="t" style="position:relative;font-size:${size}px;color:${mix(INK, LIGHT ? "#94a3b8" : "#64748b", e)};${glide(t - C.lines[i], linesOut, 0.6, 12)}">${esc(s)}
+        ${k > 0 ? `<div style="position:absolute;left:-4%;top:54%;height:3px;border-radius:2px;width:${(108 * e).toFixed(1)}%;background:${B.accent}"></div>` : ""}</div>`;
+    }).join("")}</div>`;
+  }
+  if (chips.length) col += `<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:14px;max-width:${w}px;margin-top:${big ? 30 : 22}px">${chips.map((c, i) =>
+    `<div class="i" style="font-size:26px;font-weight:500;color:${INK};padding:11px 26px;border-radius:999px;border:1.5px solid ${LIGHT ? "rgba(15,23,42,.24)" : "rgba(255,255,255,.26)"};${glide(t - C.chips[i], out, 0.6, 10)}">${esc(c)}</div>`).join("")}</div>`;
+  const box = `position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center`;
+  let html = `<div style="${box};gap:18px">${col}</div>`;
+  if (sc.then) html += `<div style="${box}"><div class="t" style="font-size:${fitPx(plain(sc.then), tf, w * 0.9, 120)}px;${glide(t - C.then - 0.2, out, 0.9, 22)}">${titleHtml(sc.then)}</div>
+    <div style="margin-top:30px;height:3px;border-radius:2px;background:${B.accent};width:${(ease((t - C.then - 0.6) / 0.6) * 72).toFixed(1)}px;opacity:${clamp(out / 0.3)}"></div></div>`;
+  return html;
+}
+
 // ---- the chapter bar: one segment per step, the current one filling
+// (a type scene is a chapter only when it has one)
+const CHAPTERS = TL.scenes.filter((s) => s.kind !== "type" || s.chapter);
 function chapters(t, x0, x1, y, k) {
-  const N = TL.scenes.length, gap = 12, sw = (x1 - x0 - gap * (N - 1)) / N;
+  const N = CHAPTERS.length, gap = 12, sw = (x1 - x0 - gap * (N - 1)) / N;
   return `<div style="position:absolute;left:${x0}px;top:${y}px;width:${x1 - x0}px;display:flex;gap:${gap}px;opacity:${k.toFixed(3)}">` +
-    TL.scenes.map((s) => {
+    CHAPTERS.map((s) => {
       const p = t >= s.end ? 1 : clamp((t - s.start) / (s.end - s.start)), now = t >= s.start && t < s.end;
       return `<div style="width:${sw}px"><div style="height:4px;border-radius:2px;background:${FAINT};overflow:hidden">
         <div style="height:100%;width:${(p * 100).toFixed(2)}%;background:${now ? B.accent : alpha(LIGHT ? "#0f172a" : "#ffffff", 0.5)}"></div></div>
@@ -132,7 +163,7 @@ window.render = (t) => {
   const endStart = TL.total - TL.end.len, N = TL.scenes.length;
 
   if (TL.slide) {  // one scene alone: the frame, the camera, no title; fades from and to the ground
-    if (sc) html = footage(sc, t, html);
+    if (sc) html = sc.kind === "type" ? typeScene(sc, t, [80, 70, W - 160, H - 140]) : footage(sc, t, html);
     const f = TL.slide.fade ?? 0.4, last = TL.total - 1 / FPS;
     fade.style.background = G;
     fade.style.opacity = (1 - Math.min(clamp(t / f), clamp((last - t) / f))).toFixed(3);
@@ -150,10 +181,16 @@ window.render = (t) => {
       <div class="t" style="font-size:${tsize}px;${glide(t - 0.25, out, 0.9, 22)}">${titleHtml(I.title)}</div>
       <div style="height:3px;border-radius:2px;background:${B.accent};width:${(ease((t - 0.6) / 0.6) * 72).toFixed(1)}px;opacity:${clamp(out / 0.3)}"></div>
       ${I.sub ? `<div class="i" style="font-size:30px;font-weight:400;color:${MUTED};max-width:${W * 0.7}px;${glide(t - 0.55, out)}">${esc(I.sub)}</div>` : ""}</div>`;
+  } else if (sc && sc.kind === "type") {
+    // Type only: the content where the window would be, the chapter bar where it always is.
+    const [x, y, w, h] = sc.rect, beside = (sc.layout ?? "above") === "beside";
+    const x0 = beside ? 96 : x, barY = beside ? H - 64 : y + h + 26;
+    html += typeScene(sc, t, [x0, 90, x + w - x0, barY - 60 - 90]);
+    html += chapters(t, x0, x + w, barY, clamp((t - TL.intro.len) / 0.4) * clamp((endStart - t) / 0.3));
   } else if (sc) {
     const lt = t - sc.start, out = sc.end - t, [x, y, w, h] = sc.rect, lay = sc.layout ?? "above";
     html = footage(sc, t, html);
-    const label = `Step ${sc.n} of ${N}`;
+    const label = `Step ${sc.step ?? sc.n} of ${TL.steps ?? N}`;
     const fwd = (sc.ff ?? []).find(([a, b]) => t >= a && t < b);
     const chip = fwd ? `<div class="i" style="display:inline-flex;align-items:center;gap:6px;font-size:15px;font-weight:600;color:${MUTED};border:1px solid ${FAINT};border-radius:999px;padding:4px 12px;opacity:${(clamp((t - fwd[0]) / 0.1) * clamp((fwd[1] - t) / 0.1)).toFixed(3)}">
       ${[0, 1].map((i) => `<span style="opacity:${i === Math.floor(t * 8) % 2 ? 1 : 0.35}">›</span>`).join("")} ${fwd[2]}×</div>` : "";
