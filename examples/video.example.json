@@ -1,0 +1,108 @@
+{
+  "out": "my-feature-tutorial.mp4",
+  "clips": "clips/clips.json",
+  "work": "out",
+  "speed": 1.5,
+  "mode": "tutorial",
+  "brand": {
+    "accent": "#4ade80",
+    "alert": "#f87171",
+    "glow": "#0b2416",
+    "site": "EXAMPLE.COM",
+    "date": "2026-10-23",
+    "clock": "04:21:07"
+  },
+  "intro": {
+    "len": 3.0,
+    "alert": "● ALERT // NEW FEATURE DETECTED",
+    "title": [
+      [
+        "MY ",
+        ""
+      ],
+      [
+        "FEATURE",
+        "a"
+      ]
+    ],
+    "sub": "ONE LINE ON WHAT IT IS FOR"
+  },
+  "scenes": [
+    {
+      "clip": "s1",
+      "kind": "desk",
+      "cam": "CAM 01 // DASHBOARD",
+      "title": [
+        [
+          "OPEN THE ",
+          ""
+        ],
+        [
+          "PANEL",
+          "a"
+        ]
+      ],
+      "sub": "Short, plain sentence on what the viewer is watching."
+    },
+    {
+      "clip": "s2",
+      "kind": "desk",
+      "crop": [
+        500,
+        120,
+        760,
+        680
+      ],
+      "cam": "CAM 02 // DASHBOARD",
+      "title": [
+        [
+          "ASK ",
+          ""
+        ],
+        [
+          "ANYTHING",
+          "a"
+        ]
+      ],
+      "sub": "crop = [x, y, w, h] in recording pixels, to zoom on one part of the page."
+    },
+    {
+      "clip": "s3",
+      "kind": "phone",
+      "cam": "CAM 03 // MOBILE",
+      "title": [
+        [
+          "SAME ON ",
+          ""
+        ],
+        [
+          "YOUR PHONE",
+          "a"
+        ]
+      ],
+      "sub": "Recorded with a 390×844 viewport."
+    }
+  ],
+  "end": {
+    "len": 3.4,
+    "logo": [
+      "logo-icon.svg",
+      "logo-text.svg"
+    ],
+    "line": "THE TAGLINE.",
+    "url": "example.com"
+  },
+  "music": {
+    "file": "music.mp3",
+    "sync": "beat",
+    "fadeIn": 0.3,
+    "fadeOut": 2.2,
+    "volume": 1.0
+  },
+  "voice": [],
+  "sfx": {
+    "cut": "auto",
+    "volume": 0.6,
+    "events": []
+  }
+}
