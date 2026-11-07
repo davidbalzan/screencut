@@ -7,7 +7,7 @@ heist-cam is a [Claude Code](https://claude.com/claude-code) skill. Ask Claude f
 2. drives your actual app in Chrome and records one short clip per step;
 3. lays the style over the footage:
    - **heist** (default): a surveillance HUD: a blinking REC light, a running timestamp, `CAM 01 // PLACE` labels, brackets that lock onto the footage, titles that decode from random glyphs, typed subtitles, a glitch at every cut, grain and scanlines;
-   - **kinetic**: huge words that slam in on the beat, colour-flip grounds between scenes, hard cuts, the screen full bleed (or in a rounded window) pushing in slowly, a typed subtitle; loads and waits fast-forwarded with a small `››› 8×` chip;
+   - **kinetic**: huge words that slam in on the beat, colour-flip grounds between scenes, hard cuts, the whole screen beside the type (or after a title card, or in a tilting window) pushing in slowly, never covered, a typed subtitle; loads and waits fast-forwarded with a small `››› 8×` chip;
 4. cuts on the beat of your music, adds a sound hit on each cut, and adds an optional voice-over;
 5. measures the result before you share it.
 
@@ -85,10 +85,10 @@ See [`examples/video.example.json`](examples/video.example.json). The build reje
 | `speed` | playback speed of the footage (default 1.5) |
 | `fastForward` | play still stretches (loads, waits) at up to 8× so each lasts ~0.25 s, keeping the clip's final hold; default on for kinetic, off for heist |
 | `fit` | `full` (default) or `content`: crop each clip to where the UI is (blank page and Playwright's grey padding cut away, padded 2 %) |
-| `frame` | kinetic only: `full` (default; the screen edge to edge) or `window` (a rounded window keeping the footage's aspect, 4:3 to 21:9) |
+| `layout` | kinetic only: `split` (default; the screen on the right, the type in a left column), `cards` (a title card before each scene, then the screen at ~90 % height over a slim caption bar) or `window` (a tilting rounded window beside the title). The screen keeps its aspect (4:3 to 21:9, letterboxed beyond) and nothing is drawn over it |
 | `brand` | `accent` / `alert` / `glow` (6-digit hex), `site` label, `date`, starting `clock`; kinetic also uses `ground` (the dark background) and `palette[]` (flip grounds and highlights), both derived from `accent` when left out |
 | `intro` | `len`, `alert` line, `title`, `sub` |
-| `scenes[]` | `clip`, `kind` (heist: `desk` / `wide` / `phone` / `full`, where `full` is 16:10, the whole screen beside the title), optional `crop` `[x,y,w,h]` to zoom (wins over `fit`), `cam`, `title` as `[["TEXT ", ""], ["ACCENT", "a"]]`, `sub`; per scene `speed`, `fastForward`, `fit`, `frame`, and `ramps` `[{from, to, speed}]` (seconds into the clip's action) to fast-forward a stretch by hand |
+| `scenes[]` | `clip`, `kind` (heist: `desk` / `wide` / `phone` / `full`, where `full` is 16:10, the whole screen beside the title), optional `crop` `[x,y,w,h]` to zoom (wins over `fit`), `cam`, `title` as `[["TEXT ", ""], ["ACCENT", "a"]]`, `sub`; per scene `speed`, `fastForward`, `fit`, `layout`, and `ramps` `[{from, to, speed}]` (seconds into the clip's action) to fast-forward a stretch by hand |
 | `end` | `logo[]` (SVG, or PNG/WebP/JPEG with a transparent background), `logoHeights`, `line`, `url`, `blink` (default on when an SVG logo has elements marked `data-blink` or `class="blink"`: they blink, around their own centre) |
 | `music` | `file`, `sync` (`beat` / `bar`), `bpm` / `offset` / `barOffset` overrides, `fadeIn`, `fadeOut`, `volume` |
 | `sfx` | `cut` (`"auto"` or a file) plays on every cut, plus `events[]` `{at, file}` |
@@ -108,7 +108,7 @@ A style is a folder `styles/<name>/` holding `hud.html` (defines `window.render(
 | `beatGrid` | off | on: cuts and word slams on the beat, music or not |
 | `leadBeats` | 0 | 2: a title card on colour grounds before each scene's footage |
 | `fastForward`, `fit` | off, `full` | on, `full` |
-| `rects` / `frames` | rect per `kind` | `full` and `window` boxes |
+| `rects` / `layouts` | rect per `kind` | a footage box per layout |
 
 A third style is a copy of the closest folder with its own `hud.html` and `style.json`; `config.py` lists it automatically.
 

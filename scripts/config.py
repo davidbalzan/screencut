@@ -35,10 +35,10 @@ TITLE_SPEC = TITLE  # "TEXT" or [["TEXT ", ""], ["ACCENT", "a"]]
 SCENE = obj({"clip": STR, "kind": enum("desk", "wide", "phone", "full"), "rect": arr(NUM, 4), "crop": arr(NUM, 4), "cam": STR,
              "title": TITLE_SPEC, "sub": STR, "titleSize": NUM, "speed": NUM, "fastForward": BOOL,
              "ramps": arr(obj({"from": NUM, "to": NUM, "speed": NUM}, ["from", "to", "speed"])),
-             "fit": enum("full", "content"), "frame": enum("full", "window")}, ["clip", "title"])
+             "fit": enum("full", "content"), "layout": enum("split", "cards", "window")}, ["clip", "title"])
 SPEC = obj({
     "out": STR, "clips": FILE, "work": STR, "speed": NUM, "mode": enum("tutorial", "trailer"), "style": ("style",), "fastForward": BOOL,
-    "fit": enum("full", "content"), "frame": enum("full", "window"),
+    "fit": enum("full", "content"), "layout": enum("split", "cards", "window"),
     "brand": obj({"accent": HEX, "alert": HEX, "glow": HEX, "site": STR, "date": STR, "clock": STR,
                   "ground": HEX, "palette": arr(HEX)}),
     "intro": obj({"len": NUM, "alert": STR, "title": TITLE_SPEC, "sub": STR, "size": NUM}),

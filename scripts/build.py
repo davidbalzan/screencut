@@ -21,9 +21,11 @@ ENC = ["-c:v", "libx264", "-preset", "medium", "-crf", "17", "-pix_fmt", "yuv420
 FINAL = ["-c:v", "libx264", "-preset", "slow", "-crf", "22", "-profile:v", "high", "-level:v", "4.1",
          "-maxrate", "10M", "-bufsize", "20M", "-pix_fmt", "yuv420p"]
 # Fast-forward: a still stretch (a load, a wait for an answer) longer than FF_MIN seconds plays
-# at up to FF_MAX x, so it lasts about FF_KEEP s on screen: the load is still seen, quickly.
-FF_MIN, FF_MAX, FF_KEEP = 0.8, 8.0, 0.25
-WINDOW_ASPECT = (4 / 3, 21 / 9)  # a window frame keeps the footage's aspect within these
+# at up to FF_MAX x, so it lasts about FF_KEEP s on screen: the load is still seen, quickly. A
+# long wait goes faster still, so no stretch lasts more than FF_LONG s. Stretches broken only by
+# a blip (a ticking timer, a spinner frame) shorter than FF_BLIP join into one.
+FF_MIN, FF_MAX, FF_KEEP, FF_LONG, FF_BLIP = 0.8, 8.0, 0.25, 1.0, 0.35
+WINDOW_ASPECT = (4 / 3, 21 / 9)  # hud layouts show the footage at its own aspect within these
 BLINK = re.compile(r'data-blink|class="[^"]*\bblink\b')
 
 
@@ -54,10 +56,19 @@ def speed_plan(f, c, s, speed, auto):
         src_end = min(raw, total_src - start)
         if open_at is not None:
             still.append((open_at, src_end))
+        joined = []  # [start, end, start of its last piece]
         for a, b in still:
-            if b >= src_end - 0.15 or b - a < FF_MIN or any(a < y and b > x for x, y, _ in fast[:len(s.get("ramps", []))]):
+            if joined and a - joined[-1][1] < FF_BLIP:
+                joined[-1] = [joined[-1][0], b, a]
+            else:
+                joined.append([a, b, a])
+        for a, b, last in joined:
+            if b >= src_end - 0.15:  # the hold that ends the clip stays; only the wait before it goes fast
+                b = last
+            if b - a < FF_MIN or any(a < y and b > x for x, y, _ in fast[:len(s.get("ramps", []))]):
                 continue
-            fast.append((a, b, max(speed, min(FF_MAX, (b - a) / FF_KEEP))))
+            shown = min(max((b - a) / FF_MAX, FF_KEEP), FF_LONG)
+            fast.append((a, b, max(speed, (b - a) / shown)))
     segs, at = [], 0.0
     for a, b, sp in sorted(fast):
         a, b = max(a, at), min(b, raw)
@@ -184,7 +195,13 @@ def main():
     # ---- timeline (already sped up)
     # Each scene: an optional lead-in of leadBeats beats (kinetic: the title slams on a colour
     # ground; the clip's first frame is held under it), then the footage from fstart.
-    intro["len"] = snap(intro["len"])
+    # A voice line anchored to a scene (voice[].scene) is never cut off by the next cut: the
+    # scene holds its last frame until the line has ended (+0.3 s).
+    said = {}
+    for v in cfg.get("voice", []):
+        if "scene" in v:
+            said[v["scene"]] = max(said.get(v["scene"], 0.0), float(v["start"]) + probe_dur(p(v["file"])) + 0.3)
+    intro["len"] = snap(max(intro["len"], said.get(0, 0.0)))
     hud_footage = style["footage"] == "hud"  # the HUD draws the footage itself (kinetic)
     t, scenes = intro["len"], []
     for i, s in enumerate(cfg["scenes"], 1):
@@ -196,33 +213,34 @@ def main():
         auto = s.get("fastForward", cfg.get("fastForward", style["fastForward"]))
         src_start, raw, segs = speed_plan(clip_file(c), c, s, sp, auto)
         shown = sum((b - a) / v for a, b, v in segs)  # on-screen seconds of footage, ramps included
-        L = round(snap(t + lead + shown) - t, 3)
+        L = round(snap(t + max(lead + shown, said.get(i, 0.0))) - t, 3)
         ff, at = [], t + lead  # fast-forwarded stretches in timeline seconds, for the HUD
         for a, b, v in segs:
             if v > sp * 1.05:
                 ff.append([round(at, 3), round(at + (b - a) / v, 3), round(v, 1)])
             at += (b - a) / v
-        # Where the footage goes: a style's rect per kind (heist), or (hud styles) its frame:
-        # "full" fills the picture edge to edge, "window" is a rounded window on a ground.
-        frame = s.get("frame", cfg.get("frame", style.get("frame")))
+        # Where the footage goes: a style's rect per kind (heist), or (hud styles) the box of its
+        # layout (kinetic: split, cards or window), in which the footage keeps its own aspect.
+        layout = s.get("layout", cfg.get("layout", style.get("layout")))
         if hud_footage:
-            rect = s.get("rect") or style["frames"][frame]
+            rect = s.get("rect") or style["layouts"][layout]
         else:
             kind = s.get("kind", style["defaultKind"])
             rect = s.get("rect") or style["rects"].get(kind) or style["rects"][style["defaultKind"]]
         crop, bg = s.get("crop"), None
         if not crop and s.get("fit", cfg.get("fit", style["fit"])) == "content":  # an explicit crop wins
-            want = WINDOW_ASPECT if hud_footage and frame == "window" else rect[2] / rect[3]
+            want = WINDOW_ASPECT if hud_footage else rect[2] / rect[3]
             r = content.content_crop(clip_file(c), src_start, raw, want)
             crop, bg = r["crop"], r["bg"]
             print(f"scene {i}: content crop {crop} of {r['size'][0]}x{r['size'][1]}")
-        if hud_footage and frame == "window" and not s.get("rect"):  # the window takes the footage's aspect
+        if hud_footage and not s.get("rect"):  # the footage keeps its aspect: nothing of the screen is cut
             cw, ch = crop[2:] if crop else probe_size(clip_file(c))
             rect = fit(min(max(cw / ch, WINDOW_ASPECT[0]), WINDOW_ASPECT[1]), rect)  # letterboxed beyond 4:3..21:9
         scenes.append(dict(n=i, clip=s["clip"], start=round(t, 3), fstart=round(t + lead, 3), end=round(t + L, 3), len=L, rect=rect,
-                           title=s["title"], sub=s.get("sub", ""), cam=s.get("cam", f"CAM {i:02d}"), frame=frame if hud_footage else None,
+                           title=s["title"], sub=s.get("sub", ""), cam=s.get("cam", f"CAM {i:02d}"), layout=layout if hud_footage else None,
                            crop=crop, bg=bg or "#0b0d10", titleSize=s.get("titleSize"), speed=sp, src=[src_start, raw], segs=segs, ff=ff))
         t += L
+    end["len"] = max(end["len"], said.get("end", 0.0))
     total = round(t + end["len"], 3)
     cuts = sorted([intro["len"]] + [s["end"] for s in scenes] + [s["fstart"] for s in scenes if s["fstart"] > s["start"]])
     voice = []
@@ -231,7 +249,7 @@ def main():
         at = 0.0 if a in (None, 0) else (total - end["len"]) if a == "end" else scenes[a - 1]["start"]
         voice.append({**v, "start": round(at + float(v["start"]), 3)})
     tl = dict(total=total, fps=FPS, intro=intro, end=end, scenes=scenes, brand=brand, mode=cfg.get("mode", "tutorial"),
-              cuts=cuts, voice=voice, style={k: v for k, v in style.items() if k not in ("rects", "frames")},
+              cuts=cuts, voice=voice, style={k: v for k, v in style.items() if k not in ("rects", "layouts")},
               beat=period, beats=[b for b in beat_list or [] if b <= total + 1])
     json.dump(tl, open(os.path.join(out, "timeline.json"), "w"))
     print(f"timeline: {style['name']} style, {len(scenes)} scenes, {total:.1f} s")
@@ -290,16 +308,14 @@ def main():
             head = ["ffmpeg", "-nostdin", "-v", "error", "-y", "-ss", f"{start}", "-t", f"{raw}", "-i", f,
                     "-f", "lavfi", "-i", f"color=c={BG}:s=1920x1080:r={FPS}:d={s['len']}", "-filter_complex"]
             if hud_footage:
-                # The HUD draws the footage (full bleed or a window, push-in) from extracted frames,
-                # at most ~1.05x the size it is shown at; the canvas mp4 is still made for the checks.
+                # The HUD draws the footage (its layout, the push-in) from extracted frames, at most
+                # ~1.05x the size it is shown at; the canvas mp4 is still made for the checks.
                 fr = os.path.join(out, "frames", f"scene{s['n']:02d}")
                 shutil.rmtree(fr, ignore_errors=True)
                 os.makedirs(fr)
-                if s["frame"] == "full":  # cover: fill the rect, cropping what overflows
-                    place = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
-                else:  # contain: letterbox in the page colour
-                    place = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color={s['bg'].replace('#', '0x')}"
-                k = (max if s["frame"] == "full" else min)(w / cw, h / ch) * 1.05  # the scale shown at, push-in included
+                # contain: letterboxed in the page colour when the aspect is beyond 4:3..21:9
+                place = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color={s['bg'].replace('#', '0x')}"
+                k = min(w / cw, h / ch) * 1.05  # the scale shown at, push-in included
                 shrink = f",scale={int(cw * k) // 2 * 2}:{int(ch * k) // 2 * 2}" if k < 1 else ""
                 run([*head, f"{src},setsar=1{grade},split[a][b];[a]{place}[v];[1:v][v]overlay={x}:{y}:shortest=1[o];[b]null{shrink}[f]",
                      "-map", "[o]", *ENC, "-t", f"{s['len']}", o,

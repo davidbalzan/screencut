@@ -25,12 +25,12 @@ Work in a folder of its own (not inside a product repo): `video.json`, `record.m
 
 1. **Agree the story first, in plain words:** who it's for, 3–6 steps, one title + one sentence per step, the length (tutorials ≈ 30–60 s at 1.5×). **Ask which style** (`"style"` in `video.json`; each is a folder under `styles/`):
    - **heist** (default): a surveillance HUD — REC light, timestamp, cam labels, brackets, titles decoding from glyphs, glitch at the cuts, grain and scanlines.
-   - **kinetic**: big beat-locked type — one word or phrase slams in per beat, colour-flip grounds (`brand.palette` on a dark `brand.ground`), hard cuts, the screen full bleed (or `"frame": "window"`: a clean rounded window), no HUD furniture. It really wants a music track with a clear beat (`music.sync`); without one it cuts on `music.bpm` or 120 BPM.
+   - **kinetic**: big beat-locked type — one word or phrase slams in per beat, colour-flip grounds (`brand.palette` on a dark `brand.ground`), hard cuts, no HUD furniture; the whole screen beside the type (`"layout": "split"`, default), after a title card (`"cards"`) or in a tilting window (`"window"`), never covered by text. It really wants a music track with a clear beat (`music.sync`); without one it cuts on `music.bpm` or 120 BPM.
  Ask for the music track and the logo; never generate a music bed (it was rejected as bad).
 2. **Record** (`examples/record.example.mjs` → your `record.mjs`):
    - `rig.clip(name, run, setup)`: `setup` (load, dismiss banners, scroll) is cut off; only `run` is kept. Hold 2–3 s on every result so it can be read.
    - Waits are fine: with `fastForward` (on in kinetic) the build plays every still stretch (a load, an answer being written) at up to 8× so it lasts ~0.25 s, keeping the final hold. The catch: a mid-clip hold meant for reading is still too, so it is sped up as well; give that scene `"fastForward": false` or explicit `ramps`.
-   - For kinetic full bleed, record at the video's 16:9 (e.g. a 1920×1080 or larger viewport) so nothing is cropped; zoom the page out rather than show half of it.
+   - For kinetic, record at 16:9 (e.g. a 2400×1350 viewport at deviceScaleFactor 2, which reads as the page zoomed out) so the whole screen fits; a page that fills only part of the viewport gets `"fit": "content"`.
    - Real clicks, real typing (`typeSlow`), real answers: wait for the actual response, never mock it.
    - **Logged-in sites:** `node scripts/login.mjs <url> <profileDir>` opens a headed Chrome and **a person logs in** (SSO, passkey). The agent never types or holds credentials. Pass the same `profileDir` to `openRig`. Keep profiles outside any repo.
    - Use test or demo data; nothing private or customer-identifying on screen. Don't show locations or names someone asked to keep off camera.
