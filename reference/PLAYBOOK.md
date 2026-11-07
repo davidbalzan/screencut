@@ -33,6 +33,14 @@ How the FindMyRTP trailer (Sep 2026), the My Casinos tutorial (Oct 2026) and the
 - A hook in the first second: the intro title slams in on frame 0, the kicker and the line right after.
 - Per scene: step and title in a band at the top, the footage in a 1000×1080 rounded window in the middle, a vertical crop of the 16:9 recording that pans after the action (smoothed, a dead zone in its middle, at most half its width a second, 1.3× to 1.8× closer than the full height), big word-by-word captions in their own band below it (the voice lines' text, each word timed by its length across the line's speech, the current word in the accent), a progress bar at the foot. Nothing sits on the footage; the fast-forward chip sits in the title band.
 - Hard cuts on the beat, speed 2×, fast-forward on: short scenes.
+## Type scenes (every style)
+A scene with `"kind": "type"` has no footage: a manifesto or vision beat between the screens ("before AI: tickets, handoffs, PRs, meetings" struck through, then "Who steers?"; or "bring your own agent" with the harnesses as chips). Nothing is drawn over footage because there is none; the build lays a blank segment under it, as for the intro and end card, and the checks leave it out of blank and still footage.
+- Cues, in beats from the scene's start (`build.py` `type_plan`): the title's two halves (2 beats), each line, each strike, `then` (2 beats), each chip; then a hold of 2 beats to read the last. On the beat grid when there is one (kinetic, social, or music sync), else every 0.5 s; a short `len` packs them closer. The timeline carries them as `scene.cues` (timeline seconds), so every HUD reads the same times.
+- **kinetic:** a full-frame palette ground (colour by scene); with lines, the title as a header and the lines big and left-aligned, slamming one per beat, then a thick bar in the text colour strikes each and it fades back; `then` slams in on the dark ground in their place, accent and all; chips are bold pills in the text colour, one slam per beat, two rows at most.
+- **keynote:** calm: the title glides in, the lines glide in under it and a thin accent line strikes each as it greys; the lines glide out as `then` glides in; chips are quiet outlined pills. The chapter bar stays where it is and keeps running; a type scene gets a segment only with a `chapter`. After a type scene the browser window fades in. No slide unless `exports.slides` is `"all"`.
+- **social:** big centred words above the caption band, the strike in the scene's colour, chips as palette pills; the progress bar continues.
+- **heist:** the text decodes on the dark canvas under the REC line; a red line cuts each struck word; `then` decodes after a "> DECRYPTED" cue; chips type in as bracketed tags.
+
 ## What worked, what was rejected
 | Worked | Rejected |
 |---|---|

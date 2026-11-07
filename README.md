@@ -90,10 +90,11 @@ See [`examples/video.example.json`](examples/video.example.json). The build reje
 | `fit` | `full` (default) or `content`: crop each clip to where the UI is (blank page and Playwright's grey padding cut away, padded 2 %) |
 | `layout` | kinetic: `split` (default; the screen on the right, the type in a left column), `cards` (a title card before each scene, then the screen at ~90 % height over a slim caption bar) or `window` (a tilting rounded window beside the title); keynote: `above` (default) or `beside`; social: `phone`. The screen keeps its aspect (4:3 to 21:9, letterboxed beyond; social crops it) and nothing is drawn over it |
 | `zoom` | keynote/social: the closest the camera goes (keynote 1.3–2.2× by default, social 1.6–2.2×); `1` turns the camera off |
-| `exports` | keynote: `slides` (default on) writes `out/slides/NN-<clip>.mp4` + `.png` + `index.md`; `aspect` `"16:9"` (default) or `"4:3"` |
+| `exports` | keynote: `slides` (default on) writes `out/slides/NN-<clip>.mp4` + `.png` + `index.md`, leaving type scenes out (`"all"` makes them slides too); `aspect` `"16:9"` (default) or `"4:3"` |
 | `brand` | `accent` / `alert` / `glow` (6-digit hex), `site` label, `date`, starting `clock`; kinetic and social also use `ground` (the dark background) and `palette[]` (flip grounds and highlights), both derived from `accent` when left out; keynote tints a deep slate toward `ground`, or uses it as is when it is light |
 | `intro` | `len`, `alert` line, `title`, `sub` |
 | `scenes[]` | `clip`, `kind` (heist: `desk` / `wide` / `phone` / `full`, where `full` is 16:10, the whole screen beside the title), optional `crop` `[x,y,w,h]` to zoom (wins over `fit`), `cam`, `title` as `[["TEXT ", ""], ["ACCENT", "a"]]`, `sub`; keynote/social: `callout` (2–4 words naming the zoomed region), `chapter` (short label in the chapter bar), `focus` `[x,y,w,h]` (recording pixels; where the camera looks, over logged boxes and motion), `zoom`; per scene `speed`, `fastForward`, `fit`, `layout`, and `ramps` `[{from, to, speed}]` (seconds into the clip's action) to fast-forward a stretch by hand |
+| `scenes[]` with `"kind": "type"` | a scene with no footage, type only (manifesto and vision beats); no `clip`. `title`, `sub`; length from `len` (seconds) or `beats` (on the beat grid, so it follows the music), else from what it shows, and stretched to a voice line anchored to it; `lines` (a few words, one per beat), `strike: true` (struck through one by one after the last), `then` (a title that replaces them: "before → after"); `chips` (labels that pop in one per beat); `chapter` (keynote: only a type scene with one gets a segment in the chapter bar). Step labels count footage scenes only |
 | `end` | `logo[]` (SVG, or PNG/WebP/JPEG with a transparent background), `logoHeights`, `line`, `url`, `blink` (default on when an SVG logo has elements marked `data-blink` or `class="blink"`: they blink, around their own centre) |
 | `music` | `file`, `sync` (`true` = the style's choice, keynote cuts on the bar; or `beat` / `bar`), `bpm` / `offset` / `barOffset` overrides, `fadeIn`, `fadeOut`, `volume` |
 | `sfx` | `cut` (`"auto"` or a file) plays on every cut, plus `events[]` `{at, file}` |
@@ -132,7 +133,7 @@ Kinetic cuts on a beat grid even without music: `music.bpm` if given, otherwise 
 | length | the file doesn't match the timeline |
 | phone playback | not H.264 yuv420p, or above level 4.2 up to 1080p in either orientation (older phones and TVs refuse it; 1080×1920@30 is 4.1) |
 | faststart | the `moov` box comes after `mdat`, so web players must download the whole file first |
-| blank footage | a scene's recording is empty, or the crop misses it |
+| blank footage | a scene's recording is empty, or the crop misses it (type scenes have no footage by design and are skipped) |
 | holds | a frozen stretch is too long, too much of a scene is still, or the result isn't held long enough to read (limits depend on the mode) |
 | loudness | outside -18..-10 LUFS integrated; true peak above -1 dBTP |
 | voice | each line, heard back **from the final mix** at its slot, matches less than 80% of its text (buried under the music or cut off) |
