@@ -89,6 +89,24 @@ def speed_plan(f, c, s, speed, auto):
     return start, raw, segs
 
 
+def type_plan(s):
+    """A type scene's cues, in beats from its start: the title's two halves, each line, each
+    strike, the `then` that replaces the lines, each chip; and the beats it needs to show them
+    all with a hold to read the last (about 1.5 s at 120 BPM)."""
+    pos, k = {"title": [], "lines": [], "strike": [], "then": None, "chips": []}, 0
+    if s.get("title"):
+        pos["title"], k = [0, 1], 2
+    n = len(s.get("lines", []))
+    pos["lines"], k = list(range(k, k + n)), k + n
+    if s.get("strike"):
+        pos["strike"], k = list(range(k, k + n)), k + n
+    if s.get("then"):
+        pos["then"], k = k, k + 2
+    c = len(s.get("chips", []))
+    pos["chips"], k = list(range(k, k + c)), k + c
+    return pos, max(k + 2, 4)
+
+
 def fit(aspect, box):
     """The largest rect of this aspect inside box [x, y, w, h], centred, even sizes."""
     x, y, w, h = box
@@ -208,8 +226,40 @@ def main():
             said[v["scene"]] = max(said.get(v["scene"], 0.0), float(v["start"]) + probe_dur(p(v["file"])) + 0.3)
     intro["len"] = snap(max(intro["len"], said.get(0, 0.0)))
     hud_footage = style["footage"] == "hud"  # the HUD draws the footage itself (kinetic)
-    t, scenes = intro["len"], []
+
+    def type_cues(i, s, t0, L):
+        """A type scene's cues in timeline seconds: on the beats of the grid when they fit the
+        scene, else evenly at the beat (0.5 s without one), closer when `len` is short."""
+        pos, need = type_plan(s)
+        k = need - 2  # cue slots, the hold after them left out
+        inside = [b for b in beat_list or [] if t0 - 0.03 <= b < t0 + L - 0.45]
+        if len(inside) >= k:
+            at = lambda j: inside[j]
+        else:
+            step = min(period or 0.5, (L - 1.0) / max(k, 1))
+            if beat_list:
+                print(f"scene {i}: {k} type cues don't fit {L:.2f} s on the beat; spaced every {step:.2f} s")
+            at = lambda j: t0 + max(step, 0.1) * j
+        cues = {key: ([round(at(j), 3) for j in v] if isinstance(v, list) else None if v is None else round(at(v), 3)) for key, v in pos.items()}
+        last = max([x for v in cues.values() for x in (v if isinstance(v, list) else [v]) if x is not None], default=t0)
+        cues["settled"] = round(min(last + 0.9, t0 + L - 0.1), 3)  # its glide or slam done
+        return cues
+
+    t, scenes, nstep = intro["len"], [], 0  # nstep: footage scenes so far (the step labels count only those)
     for i, s in enumerate(cfg["scenes"], 1):
+        if s.get("kind") == "type":  # type only, no footage: length from len, beats or what it shows
+            L0 = float(s["len"]) if "len" in s else after(t, int(s.get("beats", type_plan(s)[1])))
+            L = round(snap(t + max(L0, said.get(i, 0.0))) - t, 3)
+            layout = cfg.get("layout", style.get("layout"))
+            scenes.append(dict(n=i, kind="type", clip=None, start=round(t, 3), fstart=round(t, 3), end=round(t + L, 3), len=L,
+                               title=s.get("title", ""), sub=s.get("sub", ""), lines=s.get("lines", []), strike=bool(s.get("strike")),
+                               then=s.get("then"), chips=s.get("chips", []), cues=type_cues(i, s, t, L), segs=[], ff=[],
+                               # hud styles: where a 16:9 screen would sit, so a chapter bar stays put
+                               **({"layout": layout, "rect": fit(16 / 9, style["layouts"][layout])} if hud_footage else {}),
+                               **({"chapter": s["chapter"]} if s.get("chapter") else {})))
+            t += L
+            continue
+        nstep += 1
         c = clips.get(s["clip"])
         if not c:
             sys.exit(f"scene {i}: no clip named {s['clip']!r} in clips.json")
@@ -241,7 +291,7 @@ def main():
         cw, ch = crop[2:] if crop else probe_size(clip_file(c))
         if hud_footage and not s.get("rect") and style.get("camera") != "pan":  # the footage keeps its aspect: nothing of the screen is cut
             rect = fit(min(max(cw / ch, WINDOW_ASPECT[0]), WINDOW_ASPECT[1]), rect)  # letterboxed beyond 4:3..21:9
-        scenes.append(dict(n=i, clip=s["clip"], start=round(t, 3), fstart=round(t + lead, 3), end=round(t + L, 3), len=L, rect=rect,
+        scenes.append(dict(n=i, step=nstep, clip=s["clip"], start=round(t, 3), fstart=round(t + lead, 3), end=round(t + L, 3), len=L, rect=rect,
                            title=s["title"], sub=s.get("sub", ""), cam=s.get("cam", f"CAM {i:02d}"), layout=layout if hud_footage else None,
                            crop=crop, bg=bg or "#0b0d10", titleSize=s.get("titleSize"), speed=sp, src=[src_start, raw], segs=segs, ff=ff))
         if style.get("camera"):  # keynote zooms into the action, social pans a vertical crop after it
@@ -260,7 +310,7 @@ def main():
         at = 0.0 if a in (None, 0) else (total - end["len"]) if a == "end" else scenes[a - 1]["start"]
         voice.append({**v, "start": round(at + float(v["start"]), 3)})
     tl = dict(total=total, fps=FPS, intro=intro, end=end, scenes=scenes, brand=brand, mode=cfg.get("mode", "tutorial"),
-              cuts=cuts, voice=voice, style={k: v for k, v in style.items() if k not in ("rects", "layouts")},
+              cuts=cuts, voice=voice, steps=nstep, style={k: v for k, v in style.items() if k not in ("rects", "layouts")},
               beat=period, beats=[b for b in beat_list or [] if b <= total + 1])
     if style.get("size"):
         tl["size"] = [W, H]
@@ -275,7 +325,9 @@ def main():
                   + ", ".join(f"{b - a:.2f} s at {v:g}x" for a, b, v in s["ff"]))
     # contact-sheet times: a moment into the footage of each scene, once its title is up
     # (camera styles: the middle of the zoomed hold, so the sheet shows the spotlight and callout)
-    times = [intro["len"] * 0.8] + [(s["spots"][0][0] + s["spots"][0][1]) / 2 if s.get("spots") else
+    # (type scenes: once everything has landed)
+    times = [intro["len"] * 0.8] + [s["cues"]["settled"] if s.get("kind") == "type" else
+                                    (s["spots"][0][0] + s["spots"][0][1]) / 2 if s.get("spots") else
                                     s["fstart"] + min(s["end"] - s["fstart"] - 0.2, 2.2) for s in scenes] + [total - 0.5]
 
     if sheet_only:
@@ -295,6 +347,9 @@ def main():
             L_.write(f"file '{f}'\n")
         blank("intro", intro["len"])
         for s in scenes:
+            if s.get("kind") == "type":  # type only: a blank segment, as for the intro and end card
+                blank(f"scene{s['n']:02d}", s["len"])
+                continue
             c = clips[s["clip"]]
             f = clip_file(c)
             start, raw = s["src"]
@@ -398,7 +453,7 @@ def main():
     if exp["slides"]:
         if not hud_footage:
             sys.exit(f"exports.slides needs a style that draws the footage in its HUD; {style['name']} doesn't")
-        slides.export(tl, out, os.path.join(out, "slides"), exp["aspect"], run, HERE)
+        slides.export(tl, out, os.path.join(out, "slides"), exp["aspect"], run, HERE, with_type=exp["slides"] == "all")
     sys.exit(subprocess.run([sys.executable, os.path.join(HERE, "check.py"), cfg_path]).returncode)
 
 

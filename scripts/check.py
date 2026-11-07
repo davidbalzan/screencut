@@ -127,6 +127,9 @@ def main():
     blacks = [(float(s), float(e)) for s, e in re.findall(r"black_start:([\d.]+) black_end:([\d.]+)", r.stderr)]
     ov = lambda iv, s, e: sum(max(0.0, min(b, e) - max(a_, s)) for a_, b in iv)
     for s in tl["scenes"]:
+        if s.get("kind") == "type":  # type only, on purpose: no footage to be blank or still
+            add("PASS", f"scene {s['n']:02d} (type)", f"{s['len']:.1f} s, type only, no footage by design")
+            continue
         # from where the footage starts: a style's lead-in (kinetic title slam) holds the first frame on purpose
         S, E = s.get("fstart", s["start"]), s["end"]
         L = E - S
@@ -146,7 +149,8 @@ def main():
             issues.append(f"result held {end_hold:.1f} s at the end (min {th['minEndHold']}): may be unreadable")
         add("WARN" if issues else "PASS", name, "; ".join(issues) or f"{L:.1f} s, longest hold {longest:.1f} s, {still:.0%} still, end hold {end_hold:.1f} s")
     body = tl["total"] - tl["intro"]["len"] - tl["end"]["len"]
-    add("PASS", "pace", f"{len(tl['scenes'])} scenes, {10 * (len(tl['scenes']) - 1) / max(body, 0.1):.1f} cuts per 10 s of footage, mode {mode}")
+    typ = sum(s.get("kind") == "type" for s in tl["scenes"])
+    add("PASS", "pace", f"{len(tl['scenes'])} scenes{f' ({typ} type)' if typ else ''}, {10 * (len(tl['scenes']) - 1) / max(body, 0.1):.1f} cuts per 10 s of footage, mode {mode}")
 
     # ---- audio
     if a:

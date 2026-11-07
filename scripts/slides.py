@@ -9,7 +9,9 @@ default).
     <work>/slides/NN-<clip>.png   a poster frame at the scene's settled zoom
     <work>/slides/index.md        the list, with titles and callouts
 
-`exports.aspect`: "16:9" (1920x1080, default) or "4:3" (1440x1080).
+`exports.aspect`: "16:9" (1920x1080, default) or "4:3" (1440x1080). Type scenes (no footage)
+are left out unless `exports.slides` is "all": then each is a slide of its own type, fading in
+and out like the rest.
 """
 import json, os, shutil
 
@@ -41,21 +43,28 @@ def shifted(sc, dt):
     return s
 
 
-def export(tl, work, dest, aspect, run, here):
+def export(tl, work, dest, aspect, run, here, with_type=False):
     W, H = SIZES[aspect]
     shutil.rmtree(dest, ignore_errors=True)
     os.makedirs(dest)
     rows = []
     for sc in tl["scenes"]:
+        typ = sc.get("kind") == "type"
+        if typ and not with_type:
+            continue
         s = shifted(sc, sc["fstart"])
-        cw, ch = sc["fsize"]
-        box_h = H - 2 * MARGIN - BAR - CALLOUT
-        s["rect"] = _fit(cw / ch, MARGIN, MARGIN + BAR, W - 2 * MARGIN, box_h)
-        s["rect"][1] = (H - s["rect"][3] - BAR - CALLOUT) // 2 + BAR  # window (bar + footage) and the callout band, centred
+        if typ:
+            s["cues"] = {k: ([round(x - sc["fstart"], 3) for x in v] if isinstance(v, list) else None if v is None else round(v - sc["fstart"], 3))
+                         for k, v in sc["cues"].items()}
+        else:
+            cw, ch = sc["fsize"]
+            box_h = H - 2 * MARGIN - BAR - CALLOUT
+            s["rect"] = _fit(cw / ch, MARGIN, MARGIN + BAR, W - 2 * MARGIN, box_h)
+            s["rect"][1] = (H - s["rect"][3] - BAR - CALLOUT) // 2 + BAR  # window (bar + footage) and the callout band, centred
         total = round(s["end"], 3)
         stl = {**tl, "total": total, "size": [W, H], "slide": {"fade": FADE}, "scenes": [s], "cuts": [], "voice": [],
                "captions": [], "intro": {**tl["intro"], "len": 0}, "end": {**tl["end"], "len": 0}}
-        name = f"{sc['n']:02d}-{sc['clip']}"
+        name = f"{sc['n']:02d}-{'type' if typ else sc['clip']}"
         tmp = os.path.join(work, "slide-frames", name)
         shutil.rmtree(tmp, ignore_errors=True)
         os.makedirs(tmp)
@@ -65,12 +74,12 @@ def export(tl, work, dest, aspect, run, here):
         mp4 = os.path.join(dest, name + ".mp4")
         run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-framerate", str(tl["fps"]), "-i", os.path.join(tmp, "%05d.jpg"), *ENC, mp4])
         spot = s["spots"][0] if s["spots"] else None
-        at = (spot[0] + spot[1]) / 2 if spot else total * 0.6
+        at = s["cues"]["settled"] if typ else (spot[0] + spot[1]) / 2 if spot else total * 0.6
         pdir = os.path.join(tmp, "poster")
         run(["node", os.path.join(here, "render.mjs"), tlf, pdir, str(tl["fps"]), "--frames", str(int(at * tl["fps"])), "--png"])
         png = os.path.join(dest, name + ".png")
         shutil.move(os.path.join(pdir, os.listdir(pdir)[0]), png)
-        rows.append((name, plain(sc["title"]), sc.get("callout", ""), total))
+        rows.append((name, plain(sc["title"] or sc.get("then") or ""), sc.get("callout", ""), total))
     with open(os.path.join(dest, "index.md"), "w") as f:
         f.write(f"# Slides\n\nOne clip per slide ({aspect}, {W}x{H}, no audio, loops cleanly), each with a poster frame.\n\n")
         f.write("| # | Title | Callout | Clip | Poster | Length |\n|---|---|---|---|---|---|\n")

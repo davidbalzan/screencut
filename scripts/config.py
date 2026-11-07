@@ -32,19 +32,24 @@ def obj(fields, required=()):
 
 
 TITLE_SPEC = TITLE  # "TEXT" or [["TEXT ", ""], ["ACCENT", "a"]]
-SCENE = obj({"clip": STR, "kind": enum("desk", "wide", "phone", "full"), "rect": arr(NUM, 4), "crop": arr(NUM, 4), "cam": STR,
+SCENE = obj({"clip": STR, "kind": enum("desk", "wide", "phone", "full", "type"), "rect": arr(NUM, 4), "crop": arr(NUM, 4), "cam": STR,
              "title": TITLE_SPEC, "sub": STR, "titleSize": NUM, "speed": NUM, "fastForward": BOOL,
              "ramps": arr(obj({"from": NUM, "to": NUM, "speed": NUM}, ["from", "to", "speed"])),
              "fit": enum("full", "content"), "layout": STR,
              "focus": arr(NUM, 4), "zoom": NUM, "callout": STR, "chapter": STR}, ["clip", "title"])
+# A type scene: no footage, type only (manifesto and vision beats). Length from `len` seconds or
+# `beats` on the beat grid, else from what it shows; a voice line anchored to it stretches it.
+NO_CLIP = ("refuse", 'a type scene has no footage: drop "clip", or drop "kind": "type" to show the clip')
+TYPE_SCENE = obj({"kind": enum("type"), "clip": NO_CLIP, "title": TITLE_SPEC, "sub": STR, "len": NUM, "beats": INT,
+                  "lines": arr(STR), "strike": BOOL, "then": TITLE_SPEC, "chips": arr(STR), "chapter": STR}, ["kind"])
 SPEC = obj({
     "out": STR, "clips": FILE, "work": STR, "speed": NUM, "mode": enum("tutorial", "trailer"), "style": ("style",), "fastForward": BOOL,
     "fit": enum("full", "content"), "layout": STR, "zoom": NUM,
-    "exports": obj({"slides": BOOL, "aspect": enum("16:9", "4:3")}),
+    "exports": obj({"slides": enum(True, False, "all"), "aspect": enum("16:9", "4:3")}),  # "all": type scenes too
     "brand": obj({"accent": HEX, "alert": HEX, "glow": HEX, "site": STR, "date": STR, "clock": STR,
                   "ground": HEX, "palette": arr(HEX)}),
     "intro": obj({"len": NUM, "alert": STR, "title": TITLE_SPEC, "sub": STR, "size": NUM}),
-    "scenes": arr(SCENE),
+    "scenes": arr(("scene",)),
     "end": obj({"len": NUM, "logo": arr(FILE), "logoHeights": arr(NUM), "line": STR, "url": STR, "blink": BOOL}),
     "music": ("music",),
     "sfx": obj({"cut": ("cut",), "volume": NUM,
@@ -104,6 +109,15 @@ def validate(cfg, p):
                     check(v[k], fields[k], f"{at}.{k}")
             for k in sorted(req - v.keys()):
                 errs.append(f"{at}.{k}: required")
+        elif kind == "scene":  # a footage scene, or a type scene ("kind": "type")
+            if isinstance(v, dict) and v.get("kind") == "type":
+                return check(v, TYPE_SCENE, at)
+            only_type = [k for k in v if k in TYPE_SCENE[1] and k not in SCENE[1]] if isinstance(v, dict) else []
+            for k in only_type:
+                errs.append(f'{at}.{k}: only type scenes have {k} (add "kind": "type" and drop "clip")')
+            check({k: x for k, x in v.items() if k not in only_type} if only_type else v, SCENE, at)
+        elif kind == "refuse":
+            errs.append(f"{at}: {spec[1]}")
         elif kind == "music":
             check({"file": v} if isinstance(v, str) else v, MUSIC, at)
         elif kind == "cut":
@@ -131,6 +145,18 @@ def validate(cfg, p):
             continue
         if isinstance(s.get("speed"), (int, float)) and s["speed"] <= 0:
             errs.append(f"video.scenes[{i}].speed: must be above 0")
+        if s.get("kind") == "type":
+            if not any(s.get(k) for k in ("title", "lines", "chips", "then")):
+                errs.append(f"video.scenes[{i}]: a type scene shows something: give it a title, lines, chips or then")
+            if "len" in s and "beats" in s:
+                errs.append(f"video.scenes[{i}]: len (seconds) or beats (on the beat grid), not both")
+            if isinstance(s.get("len"), (int, float)) and s["len"] <= 0:
+                errs.append(f"video.scenes[{i}].len: must be above 0")
+            if isinstance(s.get("beats"), int) and s["beats"] < 1:
+                errs.append(f"video.scenes[{i}].beats: at least 1")
+            for k in ("strike", "then"):
+                if s.get(k) and not s.get("lines"):
+                    errs.append(f"video.scenes[{i}].{k}: works on lines; add \"lines\": [...]")
         for j, r in enumerate(s.get("ramps") if isinstance(s.get("ramps"), list) else []):
             if isinstance(r, dict) and all(isinstance(r.get(k), (int, float)) for k in ("from", "to", "speed")):
                 if not (0 <= r["from"] < r["to"]) or r["speed"] <= 0:
@@ -142,7 +168,7 @@ def validate(cfg, p):
         st = load_style(cfg.get("style", "heist"))
         for i, s in enumerate(cfg["scenes"]):  # hud styles (kinetic, keynote, social) place footage by layout, not kind
             k = s.get("kind") if isinstance(s, dict) else None
-            if k in SCENE[1]["kind"][1] and st["footage"] == "canvas" and k not in st["rects"]:
+            if k in SCENE[1]["kind"][1] and k != "type" and st["footage"] == "canvas" and k not in st["rects"]:
                 errs.append(f"video.scenes[{i}].kind: style {st['name']!r} has no {k!r}; kinds: {', '.join(st['rects'])}")
         lays = st.get("layouts", {})
         for at, v in [("video.layout", cfg.get("layout"))] + [(f"video.scenes[{i}].layout", s.get("layout")) for i, s in enumerate(cfg["scenes"]) if isinstance(s, dict)]:
@@ -158,7 +184,7 @@ def validate(cfg, p):
     if clips_path and os.path.exists(clips_path) and isinstance(cfg.get("scenes"), list):
         names = {c.get("name") for c in json.load(open(clips_path))}
         for i, s in enumerate(cfg["scenes"]):
-            if isinstance(s, dict) and isinstance(s.get("clip"), str) and s["clip"] not in names:
+            if isinstance(s, dict) and s.get("kind") != "type" and isinstance(s.get("clip"), str) and s["clip"] not in names:
                 near = difflib.get_close_matches(s["clip"], [n for n in names if n], 1)
                 errs.append(f"video.scenes[{i}].clip: no clip {s['clip']!r} in {clips_path}" + (f" (did you mean {near[0]!r}?)" if near else ""))
     elif clips_path and not os.path.exists(clips_path):
