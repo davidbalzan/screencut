@@ -1,0 +1,18 @@
+{
+  "description": "CCTV surveillance HUD: REC light, timestamp, cam labels, brackets, titles decoding from glyphs, glitch at cuts, grain, scanlines",
+  "cut": "glitch",
+  "cutSound": "static",
+  "grain": true,
+  "scanlines": true,
+  "grade": "eq=contrast=1.06:saturation=0.92",
+  "footage": "canvas",
+  "beatGrid": false,
+  "leadBeats": 0,
+  "defaultKind": "desk",
+  "rects": {
+    "desk": [90, 60, 1074, 960],
+    "wide": [90, 150, 1280, 800],
+    "phone": [420, 60, 444, 960],
+    "full": [70, 165, 1200, 750]
+  }
+}

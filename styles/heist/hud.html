@@ -7,7 +7,8 @@ html,body{margin:0;width:1920px;height:1080px;background:transparent;overflow:hi
 .mono{font-family:"JetBrains Mono",monospace}
 .osw{font-family:Oswald;text-transform:uppercase}
 .inter{font-family:Inter}
-</style></head>
+</style>
+<script src="../common.js"></script></head>
 <body><div id="root"></div>
 <script>
 // The CCTV HUD, drawn for a time t (seconds). window.render(t) is called once per frame by
@@ -20,10 +21,7 @@ const B = TL.brand;
 document.head.insertAdjacentHTML("beforeend", `<style>.a,.g{color:${B.accent}}</style>`);
 const root = document.getElementById("root");
 const GLYPHS = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789#$%&@*<>/\\";
-const rnd = (seed) => { const x = Math.sin(seed * 12.9898) * 43758.5453; return x - Math.floor(x); };
-const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
-const ease = (x) => 1 - Math.pow(1 - clamp(x), 3);
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const S = TL.style ?? {};
 
 // Text that decodes from scrambled glyphs, left to right. `parts` is [[text, class], …]
 // (class "a" = the accent colour); p goes 0 → 1.
@@ -40,8 +38,6 @@ function decode(parts, p, seed) {
     return `<span style="opacity:0">${esc(ch)}</span>`; // keeps the line width: no shift
   }).join("") + "</span>").join("");
 }
-const typed = (text, p) => esc(text.slice(0, Math.floor(clamp(p) * text.length))) + (p < 1 && Math.floor(p * 18) % 2 ? "▌" : "");
-const pad = (v, n = 2) => String(v).padStart(n, "0");
 
 function brackets([x, y, w, h], p) {
   const grow = (1 - ease(p)) * 60, L = 46, s = 3, c = B.accent;
@@ -57,7 +53,7 @@ window.render = (t) => {
   const f = Math.floor(t * 30);
 
   // Scanlines + soft vignette over everything.
-  html += `<div style="position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(0,0,0,.18) 0 1px,transparent 1px 3px);opacity:.55"></div>`;
+  if (S.scanlines !== false) html += `<div style="position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(0,0,0,.18) 0 1px,transparent 1px 3px);opacity:.55"></div>`;
   html += `<div style="position:absolute;inset:0;background:radial-gradient(75% 75% at 50% 50%,transparent 60%,rgba(0,0,0,.55) 100%)"></div>`;
 
   if (inIntro) {
@@ -89,13 +85,13 @@ window.render = (t) => {
     const lt = t - (TL.total - TL.end.len);
     html += `<div style="position:absolute;inset:0;background:radial-gradient(60% 60% at 50% 45%,${B.glow} 0%,#03060b 72%);opacity:${clamp(lt / 0.25)}"></div>`;
     html += `<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:30px;text-align:center">
-      <div style="display:flex;align-items:center;gap:22px;height:120px;opacity:${ease(lt / 0.5)};filter:blur(${(1 - ease(lt / 0.5)) * 8}px)">${TL.end.logoHtml ?? ""}</div>
+      <div id="endlogo" style="display:flex;align-items:center;gap:22px;height:120px;opacity:${ease(lt / 0.5)};filter:blur(${(1 - ease(lt / 0.5)) * 8}px)">${TL.end.logoHtml ?? ""}</div>
       <div class="osw" style="font-weight:500;font-size:46px;letter-spacing:.24em;color:#fafafa">${decode(TL.end.line, clamp((lt - 0.4) / 0.9), 77)}</div>
       <div class="mono" style="font-size:30px;letter-spacing:.08em;color:${B.accent}">${typed(TL.end.url ?? "", (lt - 1.1) / 0.6)}</div></div>`;
   }
 
   // Glitch hits at every cut.
-  const cuts = [TL.intro.len, ...TL.scenes.map((s) => s.end)];
+  const cuts = S.cut === "hard" ? [] : [TL.intro.len, ...TL.scenes.map((s) => s.end)];
   for (const c of cuts) {
     const d = t - c;
     if (d > -0.12 && d < 0.18) {
@@ -110,5 +106,6 @@ window.render = (t) => {
     }
   }
   root.innerHTML = html;
+  if (inEnd) applyBlink(root, t - (TL.total - TL.end.len));
 };
 </script></body></html>

@@ -1,0 +1,15 @@
+{
+  "description": "Kinetic type: huge beat-locked words that slam in, colour-flip grounds, hard cuts, the whole screen in a clean rounded window",
+  "cut": "hard",
+  "cutSound": "thump",
+  "grain": false,
+  "scanlines": false,
+  "grade": "",
+  "footage": "window",
+  "beatGrid": true,
+  "leadBeats": 2,
+  "defaultKind": "full",
+  "rects": {
+    "full": [610, 118, 1232, 770]
+  }
+}

@@ -5,6 +5,17 @@ values and missing files are all reported at once, so a misspelt "sycn" can't si
 """
 import difflib, json, os, re, sys
 
+STYLES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "styles")
+
+
+def styles():
+    """Every style is a folder styles/<name>/ holding hud.html and style.json."""
+    return sorted(d for d in os.listdir(STYLES_DIR) if os.path.exists(os.path.join(STYLES_DIR, d, "style.json")))
+
+
+def load_style(name):
+    return {"name": name, **json.load(open(os.path.join(STYLES_DIR, name, "style.json")))}
+
 NUM, INT, STR, BOOL, HEX, FILE, TITLE = "number", "integer", "string", "boolean", "hex", "file", "title"
 
 
@@ -21,18 +32,19 @@ def obj(fields, required=()):
 
 
 TITLE_SPEC = TITLE  # "TEXT" or [["TEXT ", ""], ["ACCENT", "a"]]
-SCENE = obj({"clip": STR, "kind": enum("desk", "wide", "phone"), "rect": arr(NUM, 4), "crop": arr(NUM, 4), "cam": STR,
+SCENE = obj({"clip": STR, "kind": enum("desk", "wide", "phone", "full"), "rect": arr(NUM, 4), "crop": arr(NUM, 4), "cam": STR,
              "title": TITLE_SPEC, "sub": STR, "titleSize": NUM}, ["clip", "title"])
 SPEC = obj({
-    "out": STR, "clips": FILE, "work": STR, "speed": NUM, "mode": enum("tutorial", "trailer"),
-    "brand": obj({"accent": HEX, "alert": HEX, "glow": HEX, "site": STR, "date": STR, "clock": STR}),
+    "out": STR, "clips": FILE, "work": STR, "speed": NUM, "mode": enum("tutorial", "trailer"), "style": ("style",),
+    "brand": obj({"accent": HEX, "alert": HEX, "glow": HEX, "site": STR, "date": STR, "clock": STR,
+                  "ground": HEX, "palette": arr(HEX)}),
     "intro": obj({"len": NUM, "alert": STR, "title": TITLE_SPEC, "sub": STR, "size": NUM}),
     "scenes": arr(SCENE),
-    "end": obj({"len": NUM, "logo": arr(FILE), "logoHeights": arr(NUM), "line": STR, "url": STR}),
+    "end": obj({"len": NUM, "logo": arr(FILE), "logoHeights": arr(NUM), "line": STR, "url": STR, "blink": BOOL}),
     "music": ("music",),
     "sfx": obj({"cut": ("cut",), "volume": NUM,
                 "events": arr(obj({"at": NUM, "file": FILE, "volume": NUM}, ["at", "file"]))}),
-    "voice": arr(obj({"file": FILE, "start": NUM, "volume": NUM, "text": STR, "languageCode": STR}, ["file", "start"])),
+    "voice": arr(obj({"file": FILE, "start": NUM, "scene": ("anchor",), "volume": NUM, "text": STR, "languageCode": STR}, ["file", "start"])),
     "checks": obj({"maxHold": NUM, "maxStill": NUM, "minEndHold": NUM, "transcribe": BOOL, "minVoiceMatch": NUM,
                    "stt": enum("elevenlabs", "google")}),
 }, ["scenes"])
@@ -92,6 +104,14 @@ def validate(cfg, p):
         elif kind == "cut":
             if v != "auto":
                 check(v, FILE, at)
+        elif kind == "style":
+            if v not in styles():
+                near = difflib.get_close_matches(str(v), styles(), 1)
+                errs.append(f"{at}: unknown style {v!r}" + (f" (did you mean {near[0]!r}?)" if near else "") + f"; styles: {', '.join(styles())}")
+        elif kind == "anchor":  # voice start relative to a scene's cut: 0 = intro, 1..n = scene, "end" = end card
+            n = len(cfg.get("scenes", [])) if isinstance(cfg.get("scenes"), list) else 0
+            if not (v == "end" or (isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= n)):
+                errs.append(f'{at}: expected 0 (intro), 1..{n} (a scene) or "end", got {v!r}')
 
     check(cfg, SPEC, "video")
     if isinstance(cfg.get("scenes"), list) and not cfg["scenes"]:
@@ -101,6 +121,12 @@ def validate(cfg, p):
     clock = cfg.get("brand", {}).get("clock") if isinstance(cfg.get("brand"), dict) else None
     if isinstance(clock, str) and not re.fullmatch(r"\d\d:\d\d:\d\d", clock):
         errs.append(f"video.brand.clock: expected HH:MM:SS, got {clock!r}")
+    if cfg.get("style", "heist") in styles() and isinstance(cfg.get("scenes"), list):
+        st = load_style(cfg.get("style", "heist"))
+        for i, s in enumerate(cfg["scenes"]):  # window styles fit any kind into their one footage box
+            k = s.get("kind") if isinstance(s, dict) else None
+            if k in SCENE[1]["kind"][1] and st["footage"] != "window" and k not in st["rects"]:
+                errs.append(f"video.scenes[{i}].kind: style {st['name']!r} has no {k!r}; kinds: {', '.join(st['rects'])}")
     clips_path = p(cfg.get("clips", "clips/clips.json")) if isinstance(cfg.get("clips", ""), str) else None
     if clips_path and os.path.exists(clips_path) and isinstance(cfg.get("scenes"), list):
         names = {c.get("name") for c in json.load(open(clips_path))}

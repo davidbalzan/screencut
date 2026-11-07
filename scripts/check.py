@@ -64,10 +64,10 @@ def similar(a, b):  # same measure as speech.mjs
     return sum(w in A for w in Bw) / max(len(A), len(Bw), 1)
 
 
-def voice_checks(cfg, th, final, work, p, add):
+def voice_checks(cfg, tl, th, final, work, p, add):
     """Hear each voice line back from the FINAL mix (music, sfx and all) at its slot: catches a line
     buried under the music or cut off by the next one. One short paid STT call per line."""
-    lines = [v for v in cfg.get("voice", []) if v.get("text")]
+    lines = [v for v in tl.get("voice", cfg.get("voice", [])) if v.get("text")]  # starts resolved by build.py
     if not lines or th.get("transcribe") is False:
         return
     provider = th.get("stt") or ("elevenlabs" if os.environ.get("ELEVENLABS_API_KEY") else "google" if os.environ.get("GOOGLE_API_KEY") else None)
@@ -125,7 +125,9 @@ def main():
     blacks = [(float(s), float(e)) for s, e in re.findall(r"black_start:([\d.]+) black_end:([\d.]+)", r.stderr)]
     ov = lambda iv, s, e: sum(max(0.0, min(b, e) - max(a_, s)) for a_, b in iv)
     for s in tl["scenes"]:
-        S, E, L = s["start"], s["end"], s["len"]
+        # from where the footage starts: a style's lead-in (kinetic title slam) holds the first frame on purpose
+        S, E = s.get("fstart", s["start"]), s["end"]
+        L = E - S
         name = f"scene {s['n']:02d} ({s['clip']})"
         if ov(blacks, S, E) > 0.5 * L:
             add("FAIL", name, f"footage blank for {ov(blacks, S, E):.1f} of {L:.1f} s: the recording is empty or the crop misses it")
@@ -154,7 +156,7 @@ def main():
         add("PASS" if tp <= TRUE_PEAK else "WARN", "true peak", f"{tp:.1f} dBTP (max {TRUE_PEAK}): {'ok' if tp <= TRUE_PEAK else 'may clip after re-encoding; lower music/sfx volume'}")
     else:
         add("WARN", "audio", "no audio stream")
-    voice_checks(cfg, th, final, work, p, add)
+    voice_checks(cfg, tl, th, final, work, p, add)
 
     w = max(len(x["check"]) for x in res)
     for x in res:
